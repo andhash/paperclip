@@ -1,5 +1,5 @@
 {
-  "name": "@paperclipai/plugin-telegram-user-client",
+  "name": "@andhash/plugin-telegram",
   "version": "0.1.0",
   "description": "First-party Paperclip plugin for personal Telegram accounts via MTProto QR login",
   "license": "MIT",

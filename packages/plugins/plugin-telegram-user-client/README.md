@@ -1,4 +1,4 @@
-# @paperclipai/plugin-telegram-user-client
+# @andhash/plugin-telegram
 
 First-party Paperclip plugin for personal Telegram accounts.
 
