@@ -34,7 +34,6 @@ import {
   type ComposerSendRequest,
 } from "@/lib/composer-draft";
 import { classifySendFailure, type SendOutcome } from "@/lib/pending-send";
-import { createUuid } from "@/lib/uuid";
 import { describeError } from "@/api/errors";
 import { useAutoResend } from "@/hooks/useDurableSubmit";
 import { useDraftOwner } from "@/hooks/useDraftOwner";

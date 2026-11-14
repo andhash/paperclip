@@ -1,6 +1,5 @@
 import { createUuid } from "@/lib/uuid";
 import { companyProjectsQuery } from "@/lib/company-projects-query";
-import { createUuid } from "@/lib/uuid";
 import { NativeControllerContainmentRecovery } from "../components/IssueRecoveryActionCard";
 import { useIssueIdBatches } from "@/hooks/useIssueIdBatches";
 import { TaskChatLoadingShell } from "@/components/task-chat/TaskChatLoadingShell";
