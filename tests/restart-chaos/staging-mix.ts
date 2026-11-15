@@ -5,6 +5,7 @@ import type { AdapterId, FaultKind, OracleArtifacts, OracleResult, TaskFaultKind
 import type { WorkloadAgents, WorkloadDefinition } from "./workloads.js";
 
 export const STAGING_MIX = "staging-mix";
+export const MIX_MAX_MINUTES = 600;
 export const ROUND_TICKS = 45;
 export const ROUND_SECONDS = ROUND_TICKS * 2;
 export const SUBTASKS_PER_PARENT = 2;
@@ -60,7 +61,8 @@ export interface StagingMixRecord {
 
 export interface CompletionEvidence {
   completedAt: number | null;
-  runs: Array<{ runId: string | null; startedAt: number | null; acceptedDisposition: string | null; acceptedAt: number | null }>;
+  runs: Array<{ runId: string | null; startedAt: number | null; acceptedDisposition: string | null; acceptedAt: number | null; answersFollowUp?: boolean;
+    doneRejected?: boolean }>;
 }
 
 export interface RetryBanner { firstShownAt: number; lastShownAt: number; shownMs: number; visibleSince: number | null; errorCode: string | null }
@@ -145,7 +147,7 @@ export function applyStagingMix(options: WaveOptions, values: MixArgs, environme
     throw new Error(`--workload ${STAGING_MIX} takes restart faults only`);
   }
   const turnMinutes = parseRange(String(values["mix-turn-minutes"] ?? "15-45"), "mix-turn-minutes", 1, 60);
-  const minutes = whole(values["mix-minutes"], "mix-minutes", 240, 1, 600);
+  const minutes = whole(values["mix-minutes"], "mix-minutes", 240, 1, MIX_MAX_MINUTES);
   const faultSpacingMinutes = whole(values["mix-fault-spacing-minutes"], "mix-fault-spacing-minutes", 40, 1, 600);
   const arrivalCutoffMinutes = whole(values["mix-arrival-cutoff-minutes"], "mix-arrival-cutoff-minutes", turnMinutes[1], 0, 600);
   const runCapDefault = whole(environment.RESTART_CHAOS_MIX_RUN_CAP, "RESTART_CHAOS_MIX_RUN_CAP", 30, 1, 200);
@@ -220,10 +222,12 @@ function meanCycleMs(mix: Pick<StagingMixOptions, "turnMinutes">): number {
   return ((mix.turnMinutes[0] + mix.turnMinutes[1]) / 2 + 5) * 60_000;
 }
 
-export function slotTimesMs(mix: Pick<StagingMixOptions, "minutes" | "faultSpacingMinutes">): number[] {
-  const times: number[] = [];
-  for (let at = mix.faultSpacingMinutes * 60_000; at < mix.minutes * 60_000; at += mix.faultSpacingMinutes * 60_000) times.push(at);
-  return times;
+export function slotTimesMs(mix: Pick<StagingMixOptions, "minutes" | "faultSpacingMinutes">,
+  firstSlotRaw = process.env.RESTART_CHAOS_MIX_FIRST_SLOT_SECONDS): number[] {
+  const spacing = mix.faultSpacingMinutes * 60_000;
+  const first = firstSlotRaw && /^[0-9]+$/.test(firstSlotRaw) ? Math.min(Number(firstSlotRaw) * 1000, spacing) : spacing;
+  const count = Math.max(0, Math.ceil((mix.minutes * 60_000 - spacing) / spacing));
+  return Array.from({ length: count }, (_, index) => first + index * spacing);
 }
 
 export function maxSlotHoldMs(options: Pick<WaveOptions, "faults" | "k15HoldMs" | "k4HoldMaxMs">): number {
@@ -395,9 +399,14 @@ export function hasDispositions(completion: CompletionEvidence | null | undefine
   return Boolean(completion?.runs.some(run => run.acceptedDisposition !== null));
 }
 
+function countsAsDone(run: CompletionEvidence["runs"][number] | undefined, comments: readonly CommentEvidence[], nonce: string): run is CompletionEvidence["runs"][number] {
+  return run?.acceptedDisposition === "done"
+    && (!run.doneRejected || comments.some(comment => comment.runId === run.runId && isDoneComment(comment.body, nonce)));
+}
+
 export function completedAtAnchor(completion: CompletionEvidence | null | undefined, comments: readonly CommentEvidence[], nonce: string):
   { at: number | null; source: "accepted_result" | "completed_at" | "done_comment" | null } {
-  const accepted = (completion?.runs ?? []).filter(run => run.acceptedDisposition === "done" && run.acceptedAt !== null).map(run => run.acceptedAt!);
+  const accepted = (completion?.runs ?? []).filter(run => countsAsDone(run, comments, nonce) && run.acceptedAt !== null).map(run => run.acceptedAt!);
   if (accepted.length) return { at: Math.min(...accepted), source: "accepted_result" };
   if (completion?.completedAt != null) return { at: completion.completedAt, source: "completed_at" };
   const comment = firstDoneCommentAt(comments, nonce);
@@ -409,8 +418,16 @@ export function completionRunIds(comments: readonly CommentEvidence[], nonce: st
   const summaries = comments.filter(comment => anchor !== null && typeof comment.createdAt === "number" && comment.createdAt >= anchor
     && comment.body.includes(doneMarker(nonce)) && comment.runId).map(comment => comment.runId!);
   if (hasDispositions(completion)) {
-    const accepted = completion.runs.filter(run => run.acceptedDisposition === "done" && run.runId).map(run => run.runId!);
-    return [...new Set([...accepted, ...summaries])];
+    const byId = new Map(completion.runs.flatMap(run => run.runId ? [[run.runId, run] as const] : []));
+    const reportedAt = (runId: string) => {
+      const run = byId.get(runId);
+      if (countsAsDone(run, comments, nonce) && run.acceptedAt !== null) return run.acceptedAt;
+      const posted = comments.filter(comment => comment.runId === runId && typeof comment.createdAt === "number").map(comment => comment.createdAt!);
+      return posted.length ? Math.min(...posted) : run?.startedAt ?? Number.POSITIVE_INFINITY;
+    };
+    const accepted = completion.runs.filter(run => countsAsDone(run, comments, nonce) && run.runId).map(run => run.runId!);
+    const ordered = [...new Set([...accepted, ...summaries])].sort((a, b) => reportedAt(a) - reportedAt(b));
+    return ordered.filter((runId, index) => index === 0 || !byId.get(runId)?.answersFollowUp);
   }
   return [...new Set([...comments.filter(comment => isDoneComment(comment.body, nonce) && comment.runId).map(comment => comment.runId!), ...summaries])];
 }
@@ -478,7 +495,7 @@ export function gradeStagingMix(nonce: string, task: StagingMixTask, artifacts: 
   if (task.followUpAfterMs !== null) {
     const errors = artifacts.stagingMix?.followUpErrors ?? [];
     checks.push({ name: "follow_up_posted", ok: Boolean(followUp?.commentId),
-      detail: followUp?.commentId ? `comment ${followUp.commentId}` : `never posted${errors.length ? `; errors: ${errors.slice(-3).join(" | ")}` : ""}` });
+      detail: followUp?.commentId ? `comment ${followUp.commentId}${followUp.duringRun ? "" : " after the run ended"}` : `never posted${errors.length ? `; errors: ${errors.slice(-3).join(" | ")}` : ""}` });
   }
   const afterEnd = artifacts.stagingMix?.afterEndFollowUps ?? [];
   const range = task.followUpAfterMs !== null ? followUpAfterEndRange() : null;
@@ -610,11 +627,14 @@ export async function stagingMixStep(input: StagingMixStepInput): Promise<void> 
         if (commentId && !state.followUp) state.followUp = { at: now, commentId, duringRun: false, inOverlap: overlap, error: null };
       }
     }
-  } else if (task.followUpAfterMs !== null && !state.followUp && running) {
+  } else if (task.followUpAfterMs !== null && !state.followUp) {
     const plannedAt = record.createdAt + task.followUpAfterMs;
     const latestAt = Math.min(plannedAt + task.holdMs, record.createdAt + Math.round(task.rounds * ROUND_SECONDS * 1_000 * 0.85));
-    if (now >= plannedAt && (overlap || now >= latestAt)) {
-      const followUp: NonNullable<StagingMixRecord["followUp"]> = { at: now, commentId: null, duringRun: true, inOverlap: overlap, error: null };
+    const runs = sample.runs ?? [];
+    const lastEnd = Math.max(0, ...runs.map(run => Date.parse(run.finishedAt ?? "") || 0));
+    const afterRunEnd = !running && !runs.some(run => ACTIVE.has(run.status)) && lastEnd > 0 && now >= Math.max(plannedAt, latestAt);
+    if (running ? now >= plannedAt && (overlap || now >= latestAt) : afterRunEnd) {
+      const followUp: NonNullable<StagingMixRecord["followUp"]> = { at: now, commentId: null, duringRun: running, inOverlap: overlap, error: null };
       try {
         const comment = await input.api.post<{ id?: string }>(`/api/issues/${record.issueId}/comments`, { body: followUpComment(input.nonce),
           clientRequestId: followUpRequestId(record.issueId, input.nonce) });
@@ -623,9 +643,11 @@ export async function stagingMixStep(input: StagingMixStepInput): Promise<void> 
       } catch (error) {
         followUp.error = error instanceof Error ? error.message : String(error);
       }
-      if (followUp.commentId) state.followUp = followUp;
-      else (state.followUpErrors ??= []).push(followUp.error!);
-      input.note("staging_mix_follow_up", { ...followUp });
+      if (followUp.commentId) {
+        state.followUp = followUp;
+        if (afterRunEnd) (state.afterEndFollowUps ??= []).push({ afterRunEndAt: lastEnd, at: now, delayMs: now - lastEnd, commentId: followUp.commentId });
+      } else (state.followUpErrors ??= []).push(followUp.error!);
+      input.note("staging_mix_follow_up", { ...followUp, ...(afterRunEnd ? { afterRunEndAt: lastEnd } : {}) });
     }
   }
   noteRetryBanner(state, retryShown(sample), now, latestFailureCode(sample));

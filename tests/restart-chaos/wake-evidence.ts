@@ -4,7 +4,10 @@ import type { ServerProcessWindow } from "./multi-server.js";
 import { unshiftJson, unshiftMs, type AgingShift } from "./time-faults.js";
 import { ISSUE_STATUSES } from "../../packages/shared/src/constants.js";
 import type { CompletionEvidence } from "./staging-mix.js";
-import { createDb, type Db } from "../../packages/db/src/index.js";
+import { laterAnswers, rejectedDoneRuns, type DeliveryRun, type DeliveryWake } from "./follow-up-delivery.js";
+import { AGENT_SLOTS_FILE, agentSlotsFromRows } from "./agent-slots.js";
+import { agents, createDb, type Db } from "../../packages/db/src/index.js";
+import { maxConcurrentRunsSql } from "../../server/src/services/heartbeat/timer-policy.js";
 
 type Row = Record<string, unknown>;
 
@@ -60,6 +63,7 @@ export interface WakeEvidenceInput {
   controllers: readonly ControllerRow[];
   windows: readonly ServerProcessWindow[];
   issues?: readonly Row[];
+  agents?: readonly Row[];
 }
 
 export function wakeEvidenceForIssue(issueId: string, input: WakeEvidenceInput) {
@@ -76,7 +80,7 @@ export function wakeEvidenceForIssue(issueId: string, input: WakeEvidenceInput) 
       return { runId: text(run.id), status: text(run.status), invocationSource: text(run.invocationSource), triggerDetail: text(run.triggerDetail),
         wakeupRequestId: text(run.wakeupRequestId), createdAt: ms(run.createdAt), startedAt: ms(run.startedAt), finishedAt: ms(run.finishedAt),
         acceptedDisposition: text(run.acceptedDisposition), acceptedAt: ms(run.acceptedAt), contextSnapshot: run.contextSnapshot ?? null,
-        owner: owner ? { pid: owner.pid, bootId: owner.bootId, epoch: owner.epoch, processSpace: owner.processSpace } : null,
+        providerTurnStarted: run.providerTurnStarted == null ? null : Boolean(run.providerTurnStarted),        owner: owner ? { pid: owner.pid, bootId: owner.bootId, epoch: owner.epoch, processSpace: owner.processSpace } : null,
         servingAtCreate: servingAt(ms(run.createdAt), controllers, input.windows) };
     }),
     wakes: wakes.map(wake => ({ id: text(wake.id), reason: text(wake.reason), source: text(wake.source), triggerDetail: text(wake.triggerDetail),
@@ -89,14 +93,16 @@ export function wakeEvidenceForIssue(issueId: string, input: WakeEvidenceInput) 
   };
 }
 
-async function readRows(db: Pick<Db, "$client">, companyId: string, shifts: readonly AgingShift[]): Promise<Omit<WakeEvidenceInput, "windows">> {
+async function readRows(db: Pick<Db, "$client" | "select">, companyId: string, shifts: readonly AgingShift[]): Promise<Omit<WakeEvidenceInput, "windows">> {
   const client = db.$client;
   const runs = await client.unsafe(
-    `select r.id::text as id, r.issue_id::text as "issueId", r.status, r.invocation_source as "invocationSource", r.trigger_detail as "triggerDetail",
+    `select r.id::text as id, r.agent_id::text as "agentId", r.issue_id::text as "issueId", r.status, r.invocation_source as "invocationSource", r.trigger_detail as "triggerDetail",
             r.wakeup_request_id::text as "wakeupRequestId", r.context_snapshot as "contextSnapshot", r.controller_boot_id::text as "controllerBootId",
             floor(extract(epoch from r.created_at) * 1000) as "createdAt", floor(extract(epoch from r.started_at) * 1000) as "startedAt",
             floor(extract(epoch from r.finished_at) * 1000) as "finishedAt", accepted.disposition as "acceptedDisposition",
-            floor(extract(epoch from accepted.accepted_at) * 1000) as "acceptedAt"
+            floor(extract(epoch from accepted.accepted_at) * 1000) as "acceptedAt",
+            exists (select 1 from heartbeat_run_events t where t.company_id = r.company_id and t.run_id = r.id
+                       and t.event_type in ('turn.submitted', 'turn.accepted', 'turn.started')) as "providerTurnStarted"
        from heartbeat_runs r
        left join lateral (select coalesce(e.payload->'prpEvent'->'payload'->'result'->>'reportedWorkDisposition', e.payload->'result'->>'reportedWorkDisposition') as disposition, e.created_at as accepted_at
                             from heartbeat_run_events e where e.run_id = r.id and e.event_type = 'run.result.accepted'
@@ -117,6 +123,8 @@ async function readRows(db: Pick<Db, "$client">, companyId: string, shifts: read
             floor(extract(epoch from created_at) * 1000) as "createdAt"
        from activity_log where company_id::text = $1 and entity_type = 'issue' and action like 'issue.%'
         and details ? 'status' order by created_at`, [companyId]) as Row[];
+  const agentRows = (await db.select({ id: agents.id, companyId: agents.companyId, maxConcurrentRuns: maxConcurrentRunsSql() }).from(agents))
+    .filter(agent => agent.companyId === companyId) as Row[];
   const controllers = (await client.unsafe(
     `select boot_id as "bootId", epoch, process_space as "processSpace", pid, floor(extract(epoch from started_at) * 1000) as "startedAt",
             floor(extract(epoch from coalesce(stopped_at, fenced_at)) * 1000) as "endedAt" from controller_instances order by epoch`) as Row[])
@@ -125,6 +133,7 @@ async function readRows(db: Pick<Db, "$client">, companyId: string, shifts: read
   return {
     runs: unshiftRows(runs, ["createdAt", "startedAt", "finishedAt", "acceptedAt"], ["contextSnapshot"], shifts),
     issues: unshiftRows(issues, ["completedAt"], [], shifts),
+    agents: agentRows,
     wakes: unshiftRows(wakes, ["createdAt", "requestedAt", "claimedAt", "finishedAt"], ["payload"], shifts),
     statusChanges: unshiftRows(statusChanges, ["createdAt"], [], shifts),
     controllers: controllers.map(controller => ({ ...controller, startedAt: unshiftMs(controller.startedAt, shifts),
@@ -132,7 +141,7 @@ async function readRows(db: Pick<Db, "$client">, companyId: string, shifts: read
   };
 }
 
-export async function captureWakeEvidence(input: { db: Pick<Db, "$client">; companyId: string; waveDir: string;
+export async function captureWakeEvidence(input: { db: Pick<Db, "$client" | "select">; companyId: string; waveDir: string;
   observers: ReadonlyArray<EvidenceObserver> | null; windows: readonly ServerProcessWindow[];
   shifts?: readonly AgingShift[]; redact: (text: string) => string }): Promise<number> {
   const rows = await readRows(input.db, input.companyId, input.shifts ?? []);
@@ -150,6 +159,7 @@ export async function captureWakeEvidence(input: { db: Pick<Db, "$client">; comp
     written += 1;
   }
   await writeFile(path.join(directory, "servers.json"), `${JSON.stringify({ controllers: rows.controllers, harnessWindows: input.windows }, null, 2)}\n`, { mode: 0o600 });
+  await writeFile(path.join(directory, AGENT_SLOTS_FILE), `${JSON.stringify(agentSlotsFromRows(rows.agents ?? [], rows.runs), null, 2)}\n`, { mode: 0o600 });
   return written;
 }
 
@@ -158,15 +168,19 @@ export interface EvidenceObserver {
   record: { issueId: string | null; stagingMix?: { completion?: CompletionEvidence } };
 }
 
-export function completionEvidence(evidence: ReturnType<typeof wakeEvidenceForIssue>): CompletionEvidence {
-  return { completedAt: evidence.completedAt, runs: evidence.runs.map(run => ({ runId: run.runId, startedAt: run.startedAt,
-    acceptedDisposition: run.acceptedDisposition, acceptedAt: run.acceptedAt })) };
+export function completionEvidence(evidence: { completedAt: number | null; wakes?: readonly DeliveryWake[];
+  runs: ReadonlyArray<DeliveryRun & { acceptedDisposition: string | null; acceptedAt: number | null }> }): CompletionEvidence {
+  const answers = laterAnswers(evidence);
+  const rejected = rejectedDoneRuns(evidence);
+  return { completedAt: evidence.completedAt, runs: evidence.runs.map(run => ({ runId: run.runId, startedAt: run.startedAt ?? null,
+    acceptedDisposition: run.acceptedDisposition, acceptedAt: run.acceptedAt, answersFollowUp: Boolean(run.runId && answers.has(run.runId)),
+    doneRejected: Boolean(run.runId && rejected.has(run.runId)) })) };
 }
 
 export function wakeEvidenceOnce(input: { databaseUrl: () => string; companyId: string; waveDir: string;
   observers: () => ReadonlyArray<EvidenceObserver>; windows: readonly ServerProcessWindow[];
   shifts: readonly AgingShift[]; redact: (text: string) => string; note: (kind: string, data: Record<string, unknown>) => void;
-  open?: (url: string) => Pick<Db, "$client"> }): () => Promise<void> {
+  open?: (url: string) => Pick<Db, "$client" | "select"> }): () => Promise<void> {
   let done: Promise<void> | null = null;
   return () => done ??= (async () => {
     let observers: ReturnType<typeof input.observers> | null = null;

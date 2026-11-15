@@ -182,6 +182,18 @@ Core retries its original request without placement. This preserves the
 operation ID and the provider's established routing for requests made before
 this upgrade.
 
+A storage provider can declare `workspaceProvider.workspaceEnvironmentVersion: 1`.
+When the run's selected environment uses one of that same plugin's environment
+drivers, Core then adds `environment: { id, driverKey, config }` to the run's
+`prepare` requests, including verification and fresh preparation. `config` is
+the environment's driver config, the same value the driver's acquire receives.
+Core omits the field for providers that do not declare the version, for
+environments of another plugin or a non-plugin driver, and for requests made
+without the run's environment, such as reservation reconciliation, retry
+candidate selection, and finalization. The field is
+context only: it does not change the operation ID, when Core acquires the task
+lease, or the order of workspace and environment work.
+
 Before dispatching preparation for an unbound workspace, Core records the
 run and agent, plus the task placement when present. Inspection replays the
 saved request. A retry with the same run, agent, and placement uses the same
@@ -369,6 +381,11 @@ admitted lifecycle policy during restart recovery. The existing
 a Core-managed credential identity before lease acquisition. The saved warm
 preference does not bypass account ownership checks. Drivers without warm
 capability and setup probes remain ephemeral.
+
+For a warm lease, `onEnvironmentAcquireLease` receives `runnerLifecyclePolicy`
+with the idle window that Core records for the Runner. A provider with its own
+idle shutdown can use it to stop only after that window. Core does not send
+the field for other lifecycle modes.
 
 Plugin task execution uses the public, run-scoped GitHub credential broker
 when the provider advertises its versioned contract. Warm preparation updates
