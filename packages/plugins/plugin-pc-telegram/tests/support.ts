@@ -116,6 +116,7 @@ export function createMockTelegram(account: PublicTelegramAccount = {
     companyId: COMPANY_ID,
     async sendText(peerId, text) {
       sent.push({ accountId: account.telegramUserId, peerId, text });
+      return null;
     },
     async disconnect() {},
   };
@@ -148,6 +149,7 @@ export function createMockTelegram(account: PublicTelegramAccount = {
         companyId: input.companyId,
         async sendText(peerId, text) {
           sent.push({ accountId: account.telegramUserId, peerId, text });
+          return null;
         },
       };
     },

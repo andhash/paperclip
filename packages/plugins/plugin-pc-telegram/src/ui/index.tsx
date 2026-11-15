@@ -1671,6 +1671,16 @@ type MessageMenuState = {
   page: "menu" | "delete" | "forward" | "reactions";
 };
 
+function sentBubble(value: unknown): ChatBubbleView | null {
+  if (!value || typeof value !== "object") return null;
+  const message = (value as { message?: unknown }).message;
+  if (!message || typeof message !== "object") return null;
+  const row = message as ChatBubbleView;
+  if (row.direction !== "out" || !isTelegramMessageId(row.id)) return null;
+  if (typeof row.text !== "string" || !row.text.trim() || typeof row.at !== "string" || !row.at) return null;
+  return { id: row.id, direction: "out", text: row.text, at: row.at, forward: row.forward ?? null };
+}
+
 export function TelegramInboxPage({
   context,
 }: {
@@ -2122,7 +2132,22 @@ export function TelegramInboxPage({
     setSendError(null);
     try {
       const replyTo = reply && isTelegramMessageId(reply.id) ? reply.id : "";
-      await sendReply({ companyId, issueRef, text, ...(replyTo ? { replyTo } : {}) });
+      const sent = await sendReply({ companyId, issueRef, text, ...(replyTo ? { replyTo } : {}) });
+      const message = sentBubble(sent);
+      if (message && cacheKey) {
+        const base = threadCache.get(cacheKey) ?? transcriptRef.current;
+        if (base) {
+          const next = {
+            ...base,
+            messages: mergeThreadMessages(base.messages, [message]).filter((item) => !hiddenIds.current.has(item.id)),
+          };
+          storeThread(cacheKey, next);
+          setTranscript(next);
+          stickRef.current = true;
+          setFeedRange(tailFeedRange(next.messages.length));
+          setBelow(0);
+        }
+      }
       setDraft("");
       setReply(null);
       refreshThread.current();

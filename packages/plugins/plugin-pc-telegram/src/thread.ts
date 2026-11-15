@@ -56,6 +56,32 @@ export function mapTelegramMessage(message: TelegramHistoryMessage | null | unde
   };
 }
 
+function sentMessageId(value: unknown): string {
+  if (typeof value === "bigint") return value > 0n ? value.toString() : "";
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return String(Math.trunc(value));
+  if (typeof value === "string" && /^\d{1,16}$/.test(value)) return value;
+  if (value && typeof value === "object" && "toString" in value) {
+    const text = String(value);
+    if (/^\d{1,16}$/.test(text)) return text;
+  }
+  return "";
+}
+
+/** The message we just sent. GramJS does not emit NewMessage for UpdateShortSentMessage. */
+export function bubbleFromSentMessage(sent: unknown, text: string): ChatBubble | null {
+  const body = clip(text);
+  if (!body) return null;
+  const mapped = mapTelegramMessage(sent as TelegramHistoryMessage);
+  const id = sentMessageId(mapped?.id ?? (sent && typeof sent === "object" ? (sent as { id?: unknown }).id : null));
+  if (!id || id.length > 16) return null;
+  return {
+    id,
+    direction: "out",
+    text: mapped?.text || body,
+    at: mapped?.at || new Date().toISOString(),
+  };
+}
+
 const SPEAKER_LINE = /^\*\*[^*]+\*\*$/;
 const ATTACHMENT_LINE = /^(Voice message|Photo|Video|Attachment):\s+\S+/;
 

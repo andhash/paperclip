@@ -98,7 +98,7 @@ export type QrLoginHandle = {
 export type LiveTelegramAccount = {
   account: PublicTelegramAccount;
   companyId: string;
-  sendText(peerId: string, text: string, replyTo?: string): Promise<void>;
+  sendText(peerId: string, text: string, replyTo?: string): Promise<ChatBubble | null>;
   messageAction(peerId: string, action: TelegramMessageAction): Promise<void>;
   readHistory(peerId: string, limit: number, beforeId?: string): Promise<import("./thread.js").ChatBubble[]>;
   peerNames(): Promise<Array<{ id: string; name: string }>>;

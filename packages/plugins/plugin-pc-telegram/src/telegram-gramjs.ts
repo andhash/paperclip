@@ -18,7 +18,7 @@ import {
   type PeerSummary,
   type ProfilePhotoMemory,
 } from "./peer-card.js";
-import { mapTelegramMessage, type ChatBubble, type TelegramHistoryMessage } from "./thread.js";
+import { bubbleFromSentMessage, mapTelegramMessage, type ChatBubble, type TelegramHistoryMessage } from "./thread.js";
 import { createLoginPasswordGate } from "./password-gate.js";
 import { qrImageDataUrl, telegramQrUrl } from "./qr.js";
 import type { TelegramMessageAction } from "./message-menu.js";
@@ -594,7 +594,8 @@ export function createGramJsClientFactory(): TelegramClientFactory {
         companyId: input.companyId,
         async sendText(peerId, text, replyTo) {
           const reply = typeof replyTo === "string" && /^\d{1,16}$/.test(replyTo) ? Number(replyTo) : 0;
-          await client.sendMessage(peerId, reply > 0 ? { message: text, replyTo: reply } : { message: text });
+          const sent = await client.sendMessage(peerId, reply > 0 ? { message: text, replyTo: reply } : { message: text });
+          return bubbleFromSentMessage(sent, text);
         },
         async messageAction(peerId, action: TelegramMessageAction) {
           const peer = client.getInputEntity ? await client.getInputEntity(peerId) : peerId;

@@ -399,6 +399,27 @@ export function createTelegramUserClientPlugin(deps: TelegramPluginDeps = {}) {
     });
   }
 
+  function publishSentBubble(
+    companyId: string,
+    accountId: string,
+    peerId: string,
+    bubble: ChatBubble | null,
+    issueRef: string,
+  ) {
+    if (bubble) {
+      applyInboxUpdate({
+        type: "upsert",
+        companyId,
+        accountId,
+        peerId,
+        inserted: true,
+        bubble,
+      }, issueRef);
+      return;
+    }
+    historyCache.delete(historyCacheKey(accountId, peerId, ""));
+  }
+
   async function handleInbound(message: Parameters<typeof ingestInboundMessage>[2]) {
     const ctx = pluginContext;
     if (!ctx) return;
@@ -1246,9 +1267,10 @@ export function createTelegramUserClientPlugin(deps: TelegramPluginDeps = {}) {
           throw new Error("That Telegram account is not live in the plugin worker.");
         }
         const replyTo = /^\d{1,16}$/.test(readString(params.replyTo)) ? readString(params.replyTo) : "";
-        await live.sendText(authorized.peerId, text.trim(), replyTo || undefined);
+        const message = await live.sendText(authorized.peerId, text.trim(), replyTo || undefined);
+        publishSentBubble(companyId, authorized.accountId, authorized.peerId, message, issue.identifier || issue.id);
         await rememberOutbound(ctx, issue.id, text);
-        return { sent: true };
+        return { sent: true, message };
       });
 
       ctx.actions.register("chat-message-menu", async (params, actionCtx) => {
@@ -1505,12 +1527,14 @@ export function createTelegramUserClientPlugin(deps: TelegramPluginDeps = {}) {
           };
           const connections = await listConnections(ctx, runCtx.companyId, liveAccountIds());
           let issueOriginId: string | null = null;
+          let issueRef = "";
           if (payload.issueId) {
             const issue = await ctx.issues.get(payload.issueId, runCtx.companyId);
             if (!issue || issue.originKind !== DIALOG_ORIGIN_KIND) {
               return { error: "This issue is not a Telegram dialog." };
             }
             issueOriginId = issue.originId ?? null;
+            issueRef = issue.identifier || issue.id;
           }
           const authorized = authorizeSendText(connections, {
             companyId: runCtx.companyId,
@@ -1530,7 +1554,8 @@ export function createTelegramUserClientPlugin(deps: TelegramPluginDeps = {}) {
           if (refused) return { error: refused };
           if (payload.issueId) pendingOutbound.set(payload.issueId, outboundTextHash(text));
           try {
-            await live.sendText(authorized.peerId, text);
+            const message = await live.sendText(authorized.peerId, text);
+            publishSentBubble(runCtx.companyId, authorized.accountId, authorized.peerId, message, issueRef);
             if (payload.issueId) await rememberOutbound(ctx, payload.issueId, text);
           } finally {
             if (payload.issueId && pendingOutbound.get(payload.issueId) === outboundTextHash(text)) {
