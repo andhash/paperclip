@@ -1,3 +1,4 @@
+import { createUuid } from "@/lib/uuid";
 import { useCurrentAccountGuard } from "../hooks/useAccountBoundMutation";
 import { createUuid } from "@/lib/uuid";
 import { resolveIssueChatHumanAuthor } from "@/lib/issue-chat-human-author";
@@ -6926,7 +6927,9 @@ export function IssueChatThread({
                 mentions={mentions}
                 agentMap={agentMap}
                 hasActiveRun={!!hasActiveRun}
-                onStop={hasActiveRun ? onCancelRun : undefined}
+                // A run still waiting in line is stoppable too: Stop takes the
+                // task out of the agent's queue before it ever starts.
+                onStop={activeRunIds.size > 0 ? onCancelRun : undefined}
                 stopPending={stopPending}
                 stopScope={stopScope}
                 currentUserId={currentUserId}
