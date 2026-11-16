@@ -336,8 +336,8 @@ export function Dashboard() {
   }, [issues]);
 
   const agentName = (id: string | null) => {
-    if (!id || !agents) return null;
-    return agents.find((a) => a.id === id)?.name ?? null;
+    if (!id) return null;
+    return agentMap.get(id)?.name ?? null;
   };
 
   if (!selectedCompanyId) {
@@ -610,12 +610,9 @@ export function Dashboard() {
                           </span>
                           <span className="flex min-h-6 min-w-0 items-center gap-2 @xl:contents">
                             <span className="flex min-w-0 flex-1 items-center @xl:col-start-3 @xl:row-start-1 @xl:self-center">
-                              {issue.assigneeAgentId && (() => {
-                                const name = agentName(issue.assigneeAgentId);
-                                return name
-                                  ? <AgentIdentity agent={agents?.find(agent => agent.id === issue.assigneeAgentId) ?? { id: issue.assigneeAgentId ?? undefined, name }} size="sm" className="max-w-32" />
-                                  : null;
-                              })()}
+                              {issue.assigneeAgentId && agentName(issue.assigneeAgentId) ? (
+                                <AgentIdentity agent={agentMap.get(issue.assigneeAgentId)!} size="sm" className="max-w-32" />
+                              ) : null}
                             </span>
                             <span className="ml-auto w-(--dashboard-list-time-width) shrink-0 whitespace-nowrap text-right text-xs text-muted-foreground">
                               {timeAgo(issue.updatedAt)}

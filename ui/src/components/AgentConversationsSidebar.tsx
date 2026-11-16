@@ -33,9 +33,10 @@ export function AgentConversationsSidebar() {
   const { pathname } = useLocation();
   const activeRef = pathname.split("/chats/")[1]?.split("/")[0];
   const roster = agents.data ?? [];
+  const rosterIds = useMemo(() => new Set((agents.data ?? []).map((agent) => agent.id)), [agents.data]);
   // The active roster excludes terminated agents, but their history remains readable.
-  const missingIds = agents.isSuccess ? [...new Set((chats.data ?? [])
-    .flatMap(chat => chat.conversationAgentId && !roster.some(agent => agent.id === chat.conversationAgentId) ? [chat.conversationAgentId] : []))] : [];
+  const missingIds = useMemo(() => agents.isSuccess ? [...new Set((chats.data ?? [])
+    .flatMap(chat => chat.conversationAgentId && !rosterIds.has(chat.conversationAgentId) ? [chat.conversationAgentId] : []))] : [], [agents.isSuccess, chats.data, rosterIds]);
   const historyAgents = useQueries({ queries: missingIds.map(id => ({
     queryKey: queryKeys.agents.detail(id), queryFn: () => agentsApi.get(id, companyId!),
   })) });

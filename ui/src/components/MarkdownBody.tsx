@@ -26,6 +26,20 @@ import { parseIssueReferenceFromHref, remarkLinkIssueReferences } from "../lib/i
 import { remarkLinkCaseReferences } from "../lib/case-reference";
 
 const CASE_HREF_RE = /^\/cases\/([A-Z][A-Z0-9]*-C\d+)$/i;
+const agentsById = new WeakMap<readonly Agent[], Map<string, Agent>>();
+
+function agentFromList(agents: readonly Agent[] | undefined, agentId: string) {
+  if (!agents) return undefined;
+  let index = agentsById.get(agents);
+  if (!index) {
+    index = new Map();
+    for (const agent of agents) {
+      if (!index.has(agent.id)) index.set(agent.id, agent);
+    }
+    agentsById.set(agents, index);
+  }
+  return index.get(agentId);
+}
 
 /** Recover the case identifier from a `/cases/PAP-C7` href produced by the plugin. */
 function caseIdentifierFromHref(href: string | undefined): string | null {
@@ -70,7 +84,7 @@ function MarkdownAgentMention({ agentId, children, style }: {
     enabled: Boolean(companyId),
     staleTime: 60_000,
   });
-  const appearance = agents?.find((agent) => agent.id === agentId)?.appearance;
+  const appearance = agentFromList(agents, agentId)?.appearance;
   return (
     <a
       href={`/agents/${agentId}`}

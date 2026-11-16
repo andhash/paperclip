@@ -26,6 +26,7 @@ import type { Issue, IssueDisplayStatus, IssueStatus } from "@paperclipai/shared
 import { AlertTriangle } from "lucide-react";
 import { isSuccessfulRunHandoffRequired } from "../lib/successful-run-handoff";
 import { collectSubtreeLiveCounts } from "../lib/liveIssueIds";
+import { indexById } from "../lib/index-by-id";
 import { cn } from "../lib/utils";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -168,7 +169,7 @@ interface KanbanBoardProps {
 function KanbanColumn({
   status,
   issues,
-  agents,
+  agentById,
   liveIssueIds,
   subtreeLiveCounts,
   compactCards = false,
@@ -179,7 +180,7 @@ function KanbanColumn({
 }: {
   status: IssueDisplayStatus;
   issues: Issue[];
-  agents?: Agent[];
+  agentById: ReadonlyMap<string, Agent>;
   liveIssueIds?: Set<string>;
   subtreeLiveCounts?: ReadonlyMap<string, number>;
   compactCards?: boolean;
@@ -245,7 +246,7 @@ function KanbanColumn({
             <KanbanCard
               key={issue.id}
               issue={issue}
-              agents={agents}
+              agentById={agentById}
               isLive={liveIssueIds?.has(issue.id)}
               subtreeLiveCount={subtreeLiveCounts?.get(issue.id) ?? 0}
               compact={compactCards}
@@ -276,7 +277,7 @@ function KanbanColumn({
 
 function KanbanCard({
   issue,
-  agents,
+  agentById,
   isLive,
   subtreeLiveCount = 0,
   isOverlay,
@@ -284,7 +285,7 @@ function KanbanCard({
   className,
 }: {
   issue: Issue;
-  agents?: Agent[];
+  agentById: ReadonlyMap<string, Agent>;
   isLive?: boolean;
   subtreeLiveCount?: number;
   isOverlay?: boolean;
@@ -305,10 +306,7 @@ function KanbanCard({
     transition,
   };
 
-  const agentName = (id: string | null) => {
-    if (!id || !agents) return null;
-    return agents.find((a) => a.id === id)?.name ?? null;
-  };
+  const assignee = issue.assigneeAgentId ? agentById.get(issue.assigneeAgentId) : undefined;
 
   return (
     <Card
@@ -371,16 +369,13 @@ function KanbanCard({
         <div className="flex items-center gap-2 min-w-0">
           {/* PAP-411: priority UI hidden behind SHOW_TASK_PRIORITY_UI. */}
           {SHOW_TASK_PRIORITY_UI && <PriorityIcon priority={issue.priority} />}
-          {issue.assigneeAgentId && (() => {
-            const name = agentName(issue.assigneeAgentId);
-            return name ? (
-              <AgentIdentity agent={agents?.find((agent) => agent.id === issue.assigneeAgentId) ?? { id: issue.assigneeAgentId, name }} size="xs" />
-            ) : (
-              <span className="text-xs text-muted-foreground font-mono">
-                {issue.assigneeAgentId.slice(0, 8)}
-              </span>
-            );
-          })()}
+          {issue.assigneeAgentId && (assignee?.name ? (
+            <AgentIdentity agent={assignee} size="xs" />
+          ) : (
+            <span className="text-xs text-muted-foreground font-mono">
+              {issue.assigneeAgentId.slice(0, 8)}
+            </span>
+          ))}
         </div>
       </Link>
     </Card>
@@ -408,6 +403,7 @@ export function KanbanBoard({
   }>({ paginationKey, counts: {} });
   const visibleCountByStatus = visibleState.paginationKey === paginationKey ? visibleState.counts : {};
   const collapsedStatusSet = useMemo(() => new Set(collapsedStatuses), [collapsedStatuses]);
+  const agentById = useMemo(() => indexById(agents), [agents]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -468,7 +464,7 @@ export function KanbanBoard({
       key={status}
       status={status}
       issues={columnIssues[status] ?? []}
-      agents={agents}
+      agentById={agentById}
       liveIssueIds={liveIssueIds}
       subtreeLiveCounts={subtreeLiveCounts}
       compactCards={compactCards}
@@ -497,7 +493,7 @@ export function KanbanBoard({
         : <div className="flex gap-3 overflow-x-auto pb-4 -mx-2 px-2">{columns}</div>}
       <DragOverlay>
         {activeIssue ? (
-          <KanbanCard issue={activeIssue} agents={agents} isOverlay compact={compactCards} />
+          <KanbanCard issue={activeIssue} agentById={agentById} isOverlay compact={compactCards} />
         ) : null}
       </DragOverlay>
     </DndContext>

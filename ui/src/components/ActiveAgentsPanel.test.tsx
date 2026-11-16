@@ -11,7 +11,7 @@ const mockHeartbeatsApi = vi.hoisted(() => ({
 }));
 
 const mockIssuesApi = vi.hoisted(() => ({
-  get: vi.fn(),
+  summaries: vi.fn(),
 }));
 
 vi.mock("@/lib/router", () => ({
@@ -28,6 +28,10 @@ vi.mock("../api/heartbeats", () => ({
 
 vi.mock("../api/issues", () => ({
   issuesApi: mockIssuesApi,
+}));
+
+vi.mock("../api/companies-query", () => ({
+  useAccountIdentity: () => ({ userId: "user-1", settled: true, failed: false, bootstrap: undefined, updatedAt: 0 }),
 }));
 
 vi.mock("./RunChatSurface", () => ({
@@ -119,7 +123,7 @@ describe("ActiveAgentsPanel", () => {
     container = document.createElement("div");
     document.body.appendChild(container);
     mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([1, 2, 3, 4, 5].map(createRun));
-    mockIssuesApi.get.mockRejectedValue(new Error("Issue not found"));
+    mockIssuesApi.summaries.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -247,11 +251,11 @@ describe("ActiveAgentsPanel", () => {
     mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([
       createIssueRun(1, "65274215-0000-4000-8000-000000000000"),
     ]);
-    mockIssuesApi.get.mockResolvedValue(createIssue(
+    mockIssuesApi.summaries.mockResolvedValue([createIssue(
       "65274215-0000-4000-8000-000000000000",
       "PAP-3562",
       "Phase 4B: Implement LLM Wiki distillation UI",
-    ));
+    )]);
 
     const root = createRoot(container);
     const queryClient = new QueryClient({
@@ -268,7 +272,12 @@ describe("ActiveAgentsPanel", () => {
     await flushReact();
 
     await waitForMicrotaskAssertion(() => {
-      expect(mockIssuesApi.get).toHaveBeenCalledWith("65274215-0000-4000-8000-000000000000");
+      expect(mockIssuesApi.summaries).toHaveBeenCalledTimes(1);
+      expect(mockIssuesApi.summaries).toHaveBeenCalledWith(
+        "company-1",
+        ["65274215-0000-4000-8000-000000000000"],
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
       const issueLink = [...container.querySelectorAll("a")].find((anchor) =>
         anchor.textContent?.includes("Phase 4B"),
       );
@@ -280,6 +289,48 @@ describe("ActiveAgentsPanel", () => {
     await act(async () => {
       root.unmount();
     });
+  });
+
+  it("loads every visible task title in one summaries request", async () => {
+    mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([
+      createIssueRun(1, "65274215-0000-4000-8000-000000000001"),
+      createIssueRun(2, "65274215-0000-4000-8000-000000000002"),
+    ]);
+    mockIssuesApi.summaries.mockResolvedValue([
+      createIssue("65274215-0000-4000-8000-000000000001", "PAP-1", "First task"),
+      createIssue("65274215-0000-4000-8000-000000000002", "PAP-2", "Second task"),
+    ]);
+
+    const root = createRoot(container);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <ActiveAgentsPanel companyId="company-1" />
+        </QueryClientProvider>,
+      );
+    });
+
+    await waitForMicrotaskAssertion(() => {
+      expect(mockIssuesApi.summaries).toHaveBeenCalledTimes(1);
+      expect(mockIssuesApi.summaries).toHaveBeenCalledWith(
+        "company-1",
+        [
+          "65274215-0000-4000-8000-000000000001",
+          "65274215-0000-4000-8000-000000000002",
+        ],
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+      expect(container.textContent).toContain("First task");
+      expect(container.textContent).toContain("Second task");
+      expect(container.textContent).toContain("PAP-1");
+      expect(container.textContent).toContain("PAP-2");
+    });
+
+    await act(async () => root.unmount());
   });
 
   it("keeps run outcomes distinct from the linked task status", async () => {

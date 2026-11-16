@@ -38,6 +38,7 @@ import {
 import { collectLiveIssueIds, collectSubtreeLiveCounts, issueWaitingOf } from "../lib/liveIssueIds";
 import { formatAssigneeUserLabel } from "../lib/assignees";
 import { buildCompanyUserLabelMap, buildCompanyUserProfileMap } from "../lib/company-members";
+import { indexById } from "../lib/index-by-id";
 import {
   armIssueDetailInboxQuickArchive,
   createIssueDetailLocationState,
@@ -1116,6 +1117,7 @@ export function Inbox() {
     for (const agent of agents ?? []) map.set(agent.id, agent.name);
     return map;
   }, [agents]);
+  const agentRecordById = useMemo(() => indexById(agents), [agents]);
 
   const issueById = useMemo(() => {
     const map = new Map<string, Issue>();
@@ -2794,8 +2796,8 @@ export function Inbox() {
                               defaultProjectWorkspaceIdByProjectId,
                             })}
                             assigneeName={agentName(issue.assigneeAgentId)}
-                            assigneeAgent={agents?.find((agent) => agent.id === issue.assigneeAgentId)}
-                            creatorAgent={agents?.find((agent) => agent.id === issue.createdByAgentId)}
+                            assigneeAgent={issue.assigneeAgentId ? agentRecordById.get(issue.assigneeAgentId) : undefined}
+                            creatorAgent={issue.createdByAgentId ? agentRecordById.get(issue.createdByAgentId) : undefined}
                             assigneeUserName={
                               formatAssigneeUserLabel(issue.assigneeUserId, currentUserId, companyUserLabelMap)
                               ?? assigneeUserProfile?.label

@@ -37,6 +37,7 @@ import { useBreadcrumbs, type Breadcrumb } from "../context/BreadcrumbContext";
 import { useToastActions } from "../context/ToastContext";
 import { queryKeys } from "../lib/queryKeys";
 import { copyTextToClipboard } from "../lib/clipboard";
+import { buildSkillFileTree, type SkillFileTreeNode } from "../lib/skill-file-tree";
 import { useCopyAction } from "../lib/use-copy-action";
 import { EmptyState } from "../components/EmptyState";
 import { MarkdownBody } from "../components/MarkdownBody";
@@ -183,13 +184,7 @@ import { GithubIcon } from "../components/icons/github-icon";
 import type { FolderListItem, FolderListResult } from "@paperclipai/shared";
 import { describeError } from "@/api/errors";
 
-type SkillTreeNode = {
-  name: string;
-  path: string | null;
-  kind: "dir" | "file";
-  fileKind?: CompanySkillFileInventoryEntry["kind"];
-  children: SkillTreeNode[];
-};
+type SkillTreeNode = SkillFileTreeNode;
 
 const SKILL_TREE_BASE_INDENT = 16;
 const SKILL_TREE_STEP_INDENT = 24;
@@ -233,42 +228,7 @@ function mergeFrontmatter(markdown: string, body: string) {
 }
 
 function buildTree(entries: CompanySkillFileInventoryEntry[]) {
-  const root: SkillTreeNode = { name: "", path: null, kind: "dir", children: [] };
-
-  for (const entry of entries) {
-    const segments = entry.path.split("/").filter(Boolean);
-    let current = root;
-    let currentPath = "";
-    for (const [index, segment] of segments.entries()) {
-      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
-      const isLeaf = index === segments.length - 1;
-      let next = current.children.find((child) => child.name === segment);
-      if (!next) {
-        next = {
-          name: segment,
-          path: isLeaf ? entry.path : currentPath,
-          kind: isLeaf ? "file" : "dir",
-          fileKind: isLeaf ? entry.kind : undefined,
-          children: [],
-        };
-        current.children.push(next);
-      }
-      current = next;
-    }
-  }
-
-  function sortNode(node: SkillTreeNode) {
-    node.children.sort((left, right) => {
-      if (left.kind !== right.kind) return left.kind === "dir" ? -1 : 1;
-      if (left.name === "SKILL.md") return -1;
-      if (right.name === "SKILL.md") return 1;
-      return left.name.localeCompare(right.name);
-    });
-    node.children.forEach(sortNode);
-  }
-
-  sortNode(root);
-  return root.children;
+  return buildSkillFileTree(entries);
 }
 
 function sourceMeta(sourceBadge: CompanySkillSourceBadge, sourceLabel: string | null) {
