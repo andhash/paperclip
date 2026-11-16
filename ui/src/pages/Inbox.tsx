@@ -18,6 +18,7 @@ import { ApiError } from "../api/client";
 import { dashboardApi } from "../api/dashboard";
 import { executionWorkspacesApi } from "../api/execution-workspaces";
 import { issuesApi } from "../api/issues";
+import { useTx } from "@/i18n/tx";
 import { useSecondTick } from "../hooks/useSecondTick";
 import { taskRetryNotStartedReason } from "../hooks/useTaskRetry";
 import { agentsApi } from "../api/agents";
@@ -48,6 +49,7 @@ import {
 import { collectLiveIssueIds, collectSubtreeLiveCounts, issueWaitingOf } from "../lib/liveIssueIds";
 import { formatAssigneeUserLabel } from "../lib/assignees";
 import { buildCompanyUserLabelMap, buildCompanyUserProfileMap } from "../lib/company-members";
+import { indexById } from "../lib/index-by-id";
 import {
   armIssueDetailInboxQuickArchive,
   createIssueDetailLocationState,
@@ -401,6 +403,7 @@ export function FailedRunInboxRow({
   selected?: boolean;
   className?: string;
 }) {
+  const tx = useTx();
   const issueId = readIssueIdFromRun(run);
   const issue = issueId ? issueById.get(issueId) ?? null : null;
   const interruption = issue?.interruption;
@@ -479,7 +482,7 @@ export function FailedRunInboxRow({
             <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               {!interruption && <StatusBadge status={run.status} />}
               {linkedAgentName && issue ? <span>{linkedAgentName}</span> : null}
-              <span className="truncate max-w-(--sz-300px)">{displayError}</span>
+              <span className="truncate max-w-(--sz-300px)">{tx(displayError)}</span>
               <span>{timeAgo(run.createdAt)}</span>
             </span>
           </span>
@@ -861,6 +864,7 @@ function StreamlinedInbox({
   toolbarContext,
   surfaceLabel = "Inbox",
 }: InboxSurfaceProps) {
+  const tx = useTx();
   const streamlinedUiEnabled = true;
   const { selectedCompanyId } = useCompany();
   const { setBreadcrumbs } = useBreadcrumbs();
@@ -1438,6 +1442,7 @@ function StreamlinedInbox({
     for (const agent of agents ?? []) map.set(agent.id, agent.name);
     return map;
   }, [agents]);
+  const agentRecordById = useMemo(() => indexById(agents), [agents]);
 
   const issueById = useMemo(() => {
     const map = new Map<string, Issue>();
@@ -3257,8 +3262,8 @@ function StreamlinedInbox({
                               defaultProjectWorkspaceIdByProjectId,
                             })}
                             assigneeName={agentName(issue.assigneeAgentId)}
-                            assigneeAgent={agents?.find((agent) => agent.id === issue.assigneeAgentId)}
-                            creatorAgent={agents?.find((agent) => agent.id === issue.createdByAgentId)}
+                            assigneeAgent={issue.assigneeAgentId ? agentRecordById.get(issue.assigneeAgentId) : undefined}
+                            creatorAgent={issue.createdByAgentId ? agentRecordById.get(issue.createdByAgentId) : undefined}
                             assigneeUserName={
                               formatAssigneeUserLabel(issue.assigneeUserId, currentUserId, companyUserLabelMap)
                               ?? assigneeUserProfile?.label
@@ -3385,14 +3390,14 @@ function StreamlinedInbox({
                           className="flex items-center gap-3 px-3 py-1.5 sm:pl-0 sm:pr-4"
                           data-testid="inbox-date-group"
                           role="separator"
-                          aria-label={dateGroupLabel}
+                          aria-label={tx(dateGroupLabel)}
                         >
                           <span className="h-px min-w-0 flex-1 bg-border/80" aria-hidden="true" data-date-group-rule="" />
                           <span
                             className="shrink-0 text-(length:--text-nano) font-medium uppercase tracking-wider text-muted-foreground/70"
                             data-date-group-label=""
                           >
-                            {dateGroupLabel}
+                            {tx(dateGroupLabel)}
                           </span>
                           <span className="h-px min-w-0 flex-1 bg-border/80" aria-hidden="true" data-date-group-rule="" />
                         </div>,
@@ -3405,7 +3410,7 @@ function StreamlinedInbox({
                             className="shrink-0 text-(length:--text-micro) font-medium uppercase tracking-wider text-muted-foreground/70"
                             data-date-group-label=""
                           >
-                            Earlier
+                            {tx("Earlier")}
                           </span>
                         </div>,
                       );

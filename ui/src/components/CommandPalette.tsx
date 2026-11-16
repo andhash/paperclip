@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { Identity } from "./Identity";
 import { agentUrl, projectUrl } from "../lib/utils";
+import { indexById } from "../lib/index-by-id";
 import {
   SEARCH_OPERATOR_QUICK_FILTERS,
   buildSearchPathFromQuery,
@@ -180,9 +181,10 @@ export function CommandPalette() {
     go(buildFullSearchPath(searchQuery, parserContext));
   }
 
+  const agentById = useMemo(() => indexById(agents), [agents]);
   const agentName = (id: string | null) => {
     if (!id) return null;
-    return agents.find((a) => a.id === id)?.name ?? null;
+    return agentById.get(id)?.name ?? null;
   };
 
   const visibleIssues = useMemo(
@@ -407,10 +409,9 @@ export function CommandPalette() {
                     {issue.identifier ?? issue.id.slice(0, 8)}
                   </span>
                   <span className="flex-1 truncate">{issue.title}</span>
-                  {issue.assigneeAgentId && (() => {
-                    const name = agentName(issue.assigneeAgentId);
-                    return name ? <AgentIdentity agent={agents?.find((agent) => agent.id === issue.assigneeAgentId) ?? { id: issue.assigneeAgentId, name }} size="sm" className="ml-2 hidden sm:inline-flex" /> : null;
-                  })()}
+                  {issue.assigneeAgentId && agentName(issue.assigneeAgentId) ? (
+                    <AgentIdentity agent={agentById.get(issue.assigneeAgentId)!} size="sm" className="ml-2 hidden sm:inline-flex" />
+                  ) : null}
                 </CommandItem>
               ))}
             </CommandGroup>

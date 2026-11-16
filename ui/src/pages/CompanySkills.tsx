@@ -37,6 +37,7 @@ import { useBreadcrumbs, type Breadcrumb } from "../context/BreadcrumbContext";
 import { useToastActions } from "../context/ToastContext";
 import { queryKeys } from "../lib/queryKeys";
 import { copyTextToClipboard } from "../lib/clipboard";
+import { buildSkillFileTree, type SkillFileTreeNode } from "../lib/skill-file-tree";
 import { useCopyAction } from "../lib/use-copy-action";
 import { EmptyState } from "../components/EmptyState";
 import { MarkdownBody } from "../components/MarkdownBody";
@@ -76,6 +77,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { buildLineDiff, type DiffRow } from "../lib/line-diff";
 import { cn, relativeTime } from "../lib/utils";
 import { resolveSkillSummaryText } from "../lib/company-skill-summary";
+import { useTx } from "@/i18n/tx";
 import {
   parseSkillRoute,
   skillRoute,
@@ -182,13 +184,7 @@ import { GithubIcon } from "../components/icons/github-icon";
 import type { FolderListItem, FolderListResult } from "@paperclipai/shared";
 import { describeError } from "@/api/errors";
 
-type SkillTreeNode = {
-  name: string;
-  path: string | null;
-  kind: "dir" | "file";
-  fileKind?: CompanySkillFileInventoryEntry["kind"];
-  children: SkillTreeNode[];
-};
+type SkillTreeNode = SkillFileTreeNode;
 
 const SKILL_TREE_BASE_INDENT = 16;
 const SKILL_TREE_STEP_INDENT = 24;
@@ -232,42 +228,7 @@ function mergeFrontmatter(markdown: string, body: string) {
 }
 
 function buildTree(entries: CompanySkillFileInventoryEntry[]) {
-  const root: SkillTreeNode = { name: "", path: null, kind: "dir", children: [] };
-
-  for (const entry of entries) {
-    const segments = entry.path.split("/").filter(Boolean);
-    let current = root;
-    let currentPath = "";
-    for (const [index, segment] of segments.entries()) {
-      currentPath = currentPath ? `${currentPath}/${segment}` : segment;
-      const isLeaf = index === segments.length - 1;
-      let next = current.children.find((child) => child.name === segment);
-      if (!next) {
-        next = {
-          name: segment,
-          path: isLeaf ? entry.path : currentPath,
-          kind: isLeaf ? "file" : "dir",
-          fileKind: isLeaf ? entry.kind : undefined,
-          children: [],
-        };
-        current.children.push(next);
-      }
-      current = next;
-    }
-  }
-
-  function sortNode(node: SkillTreeNode) {
-    node.children.sort((left, right) => {
-      if (left.kind !== right.kind) return left.kind === "dir" ? -1 : 1;
-      if (left.name === "SKILL.md") return -1;
-      if (right.name === "SKILL.md") return 1;
-      return left.name.localeCompare(right.name);
-    });
-    node.children.forEach(sortNode);
-  }
-
-  sortNode(root);
-  return root.children;
+  return buildSkillFileTree(entries);
 }
 
 function sourceMeta(sourceBadge: CompanySkillSourceBadge, sourceLabel: string | null) {
@@ -477,6 +438,7 @@ function CatalogFilterMenu({
 }
 
 function TrustChip({ level }: { level: CompanySkillTrustLevel }) {
+  const tx = useTx();
   const map = {
     markdown_only: {
       icon: ShieldCheck,
@@ -507,12 +469,13 @@ function TrustChip({ level }: { level: CompanySkillTrustLevel }) {
           {config.label}
         </Badge>
       </TooltipTrigger>
-      <TooltipContent>{config.tooltip}</TooltipContent>
+      <TooltipContent>{tx(config.tooltip)}</TooltipContent>
     </Tooltip>
   );
 }
 
 function CompatChip({ compatibility }: { compatibility: CompanySkillCompatibility }) {
+  const tx = useTx();
   if (compatibility === "compatible") return null;
   const map = {
     unknown: {
@@ -538,12 +501,13 @@ function CompatChip({ compatibility }: { compatibility: CompanySkillCompatibilit
           {config.label}
         </Badge>
       </TooltipTrigger>
-      <TooltipContent>{config.tooltip}</TooltipContent>
+      <TooltipContent>{tx(config.tooltip)}</TooltipContent>
     </Tooltip>
   );
 }
 
 function ProvenanceBadge({ packageName, packageVersion }: { packageName: string | null; packageVersion: string | null }) {
+  const tx = useTx();
   if (!packageName) return null;
   return (
     <Tooltip>
@@ -553,7 +517,7 @@ function ProvenanceBadge({ packageName, packageVersion }: { packageName: string 
           <span>{packageName}{packageVersion ? ` v${packageVersion}` : ""}</span>
         </span>
       </TooltipTrigger>
-      <TooltipContent>Installed from the app-shipped skills catalog. Provenance is signed by package version and content hash.</TooltipContent>
+      <TooltipContent>{tx("Installed from the app-shipped skills catalog. Provenance is signed by package version and content hash.")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -830,6 +794,7 @@ function SkillCard({
   onCreateFolderAndMove?: (card: DiscoveryCard) => void;
   onOpenMove?: (card: DiscoveryCard) => void;
 }) {
+  const tx = useTx();
   const source = sourceMeta(card.sourceBadge ?? "catalog", card.sourceLabel ?? null);
   const SourceIcon = source.icon;
   const badgeFolder = showFolderBadge && card.installed
@@ -919,8 +884,7 @@ function SkillCard({
       {card.forkedFrom ? (
         <div className="mt-2 inline-flex items-center gap-1 text-(length:--text-micro) text-muted-foreground">
           <GitFork className="h-3 w-3" aria-hidden="true" />
-          Forked
-        </div>
+          {tx("Forked")}</div>
       ) : null}
 
       {/* Always reserve two lines so cards line up even without a description. */}
@@ -1136,9 +1100,10 @@ export function DiscoveryGrid({
   /** Category/folder navigation stays available in production, but the Streamlined UI relies on search and scrolling. */
   showBrowseRails?: boolean;
 }) {
+  const tx = useTx();
   const installedView = tab === "installed";
   const authoredView = collectionView === "authored";
-  const viewTitle = authoredView ? "My Skills" : installedView ? "Installed skills" : "Discover skills";
+  const viewTitle = tx(authoredView ? "My Skills" : installedView ? "Installed skills" : "Discover skills");
   const viewDescription = authoredView
     ? "Skills you can open, edit and test in Studio."
     : installedView
@@ -1218,7 +1183,7 @@ export function DiscoveryGrid({
       {showBrowseRails ? (
         <aside className={cn("hidden w-60 shrink-0 flex-col overflow-hidden border-r border-border md:flex", showFolderRail && "md:hidden")}>
           <div className="border-b border-border px-4 py-4">
-            <h2 className="text-sm font-semibold text-foreground">Browse by category</h2>
+            <h2 className="text-sm font-semibold text-foreground">{tx("Browse by category")}</h2>
             <p className="text-xs text-muted-foreground">
               Filter {installedView ? "installed" : "discoverable"} skills.
             </p>
@@ -1349,7 +1314,7 @@ export function DiscoveryGrid({
                       <Compass className="mr-1.5 h-3.5 w-3.5" /> Discover skills
                     </Button>
                   ) : null}
-                  <Button size="sm" variant="outline" asChild><Link to="/skills/sources/new">Import from GitHub</Link></Button>
+                  <Button size="sm" variant="outline" asChild><Link to="/skills/sources/new">{tx("Import from GitHub")}</Link></Button>
                   <Button size="sm" variant="ghost" onClick={onCreate}>
                     Create a skill
                   </Button>
@@ -1414,6 +1379,7 @@ function NewSkillWizard({
   error: string | null;
   onCancel: () => void;
 }) {
+  const tx = useTx();
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<SkillCreateDraft>(initialDraft);
   const [slugDirty, setSlugDirty] = useState(initialDraft.slug.trim().length > 0);
@@ -1449,7 +1415,7 @@ function NewSkillWizard({
               step === index ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {label}
+            {tx(label)}
           </button>
         ))}
       </div>
@@ -1599,8 +1565,8 @@ function NewSkillWizard({
                 disabled
                 className="rounded-md border border-dashed border-border px-3 py-2 text-left text-sm text-muted-foreground"
               >
-                <span className="block font-medium">Public link</span>
-                <span className="mt-1 block text-xs">Coming later.</span>
+                <span className="block font-medium">{tx("Public link")}</span>
+                <span className="mt-1 block text-xs">{tx("Coming later.")}</span>
               </button>
             </div>
           </div>
@@ -1665,6 +1631,7 @@ function CatalogList({
   onToggleSkill: (catalogRef: string) => void;
   onToggleDir: (catalogRef: string, path: string) => void;
 }) {
+  const tx = useTx();
   const lowered = catalogFilter.trim().toLowerCase();
   const filtered = skills.filter((skill) => {
     if (kindFilter !== "all" && skill.kind !== kindFilter) return false;
@@ -1677,8 +1644,7 @@ function CatalogList({
   if (filtered.length === 0) {
     return (
       <div className="px-4 py-6 text-sm text-muted-foreground">
-        No catalog skills match this filter.
-      </div>
+        {tx("No catalog skills match this filter.")}</div>
     );
   }
 
@@ -1804,6 +1770,7 @@ function CatalogDetailPane({
   onOpenInstalled: (skillId: string) => void;
   loadingPrimaryAction: boolean;
 }) {
+  const tx = useTx();
   const fileView = useQueryView(fileQuery);
   if (!skill) {
     return <EmptyState icon={Boxes} message="Select a catalog skill to inspect." />;
@@ -1825,7 +1792,7 @@ function CatalogDetailPane({
             </Button>
           </span>
         </TooltipTrigger>
-        <TooltipContent>This skill cannot be installed — its content is not valid Agent Skills markdown.</TooltipContent>
+        <TooltipContent>{tx("This skill cannot be installed — its content is not valid Agent Skills markdown.")}</TooltipContent>
       </Tooltip>
     );
   } else if (!isInstalled) {
@@ -1885,7 +1852,7 @@ function CatalogDetailPane({
                   Update available
                 </Badge>
               </TooltipTrigger>
-              <TooltipContent>Catalog content hash has changed since this skill was installed.</TooltipContent>
+              <TooltipContent>{tx("Catalog content hash has changed since this skill was installed.")}</TooltipContent>
             </Tooltip>
           ) : null}
           {skill.requires.length > 0 ? (
@@ -1909,13 +1876,13 @@ function CatalogDetailPane({
           <span className="uppercase tracking-(--tracking-caps)">Key</span>
           <span className="font-mono">{skill.key}</span>
           <span className="uppercase tracking-(--tracking-caps)">·</span>
-          <span className="uppercase tracking-(--tracking-caps)">Hash</span>
+          <span className="uppercase tracking-(--tracking-caps)">{tx("Hash")}</span>
           <span className="font-mono">{skill.contentHash.slice(0, 24)}…</span>
           <CopyText
             text={skill.contentHash}
             copiedLabel="Copied hash"
-            ariaLabel="Copy content hash"
-            title="Copy content hash"
+            ariaLabel={tx("Copy content hash")}
+            title={tx("Copy content hash")}
             className="inline-flex h-6 w-6 items-center justify-center rounded-sm border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <Copy className="h-3 w-3" />
@@ -1933,7 +1900,7 @@ function CatalogDetailPane({
         ) : fileView.kind === "error" ? (
           <QueryErrorState error={fileQuery.error} action="load the file" onRetry={fileView.retry} retrying={fileView.isFetching} />
         ) : !fileQuery.data ? (
-          <div className="text-sm text-muted-foreground">Select a file to inspect.</div>
+          <div className="text-sm text-muted-foreground">{tx("Select a file to inspect.")}</div>
         ) : fileQuery.data.markdown ? (
           <MarkdownBody softBreaks={false} linkIssueReferences={false}>{body}</MarkdownBody>
         ) : (
@@ -1985,6 +1952,7 @@ export function InstallPreviewDialog({
   error: string | null;
   onConfirm: (input: { slug: string | null; force: boolean; agentIds: string[] }) => void;
 }) {
+  const tx = useTx();
   const [slug, setSlug] = useState<string>("");
   const [force, setForce] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -2047,29 +2015,28 @@ export function InstallPreviewDialog({
               <div className="flex items-center gap-2">
                 <TrustChip level={skill.trustLevel} />
                 {skill.trustLevel === "markdown_only" ? (
-                  <span className="text-muted-foreground">Safe</span>
+                  <span className="text-muted-foreground">{tx("Safe")}</span>
                 ) : skill.trustLevel === "scripts_executables" ? (
-                  <span className="text-amber-800 dark:text-amber-200">Review required</span>
+                  <span className="text-amber-800 dark:text-amber-200">{tx("Review required")}</span>
                 ) : (
-                  <span className="text-muted-foreground">Non-script assets</span>
+                  <span className="text-muted-foreground">{tx("Non-script assets")}</span>
                 )}
               </div>
-              <div className="text-muted-foreground">Compatibility</div>
+              <div className="text-muted-foreground">{tx("Compatibility")}</div>
               <div className="flex items-center gap-2">
                 {skill.compatibility === "compatible" ? (
                   <span className="inline-flex items-center gap-1 text-muted-foreground">
                     <Check className="h-3 w-3" aria-hidden="true" />
-                    Compatible
-                  </span>
+                    {tx("Compatible")}</span>
                 ) : (
                   <CompatChip compatibility={skill.compatibility} />
                 )}
               </div>
-              <div className="text-muted-foreground">Requires</div>
+              <div className="text-muted-foreground">{tx("Requires")}</div>
               <div className="text-foreground">{skill.requires.length === 0 ? "none" : skill.requires.join(", ")}</div>
-              <div className="text-muted-foreground">Roles</div>
+              <div className="text-muted-foreground">{tx("Roles")}</div>
               <div className="text-foreground">{skill.recommendedForRoles.length === 0 ? "any" : skill.recommendedForRoles.join(" · ")}</div>
-              <div className="text-muted-foreground">Provenance</div>
+              <div className="text-muted-foreground">{tx("Provenance")}</div>
               <div className="min-w-0">
                 <div className="truncate">{packageName ?? "—"}{packageVersion ? ` v${packageVersion}` : ""}</div>
                 <div className="truncate font-mono text-(length:--text-micro) text-muted-foreground">{skill.contentHash}</div>
@@ -2094,17 +2061,16 @@ export function InstallPreviewDialog({
 
           {conflict ? (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
-              An existing skill with key <span className="font-mono">{conflict.key}</span> is installed (
+              {tx("An existing skill with key")}<span className="font-mono">{conflict.key}</span> is installed (
               {conflict.sourceLabel ?? conflict.sourceType}). Installing will {defaultAction === "update" ? "overwrite the catalog content" : "replace the existing skill"}.
             </div>
           ) : null}
 
           {defaultAction === "install" ? (
             <div className="rounded-md border border-border p-3">
-              <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">Enable for agents</div>
+              <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">{tx("Enable for agents")}</div>
               <p className="mb-2 text-xs text-muted-foreground">
-                Installing adds the skill to the organization library. Agents can only use it once it is enabled for them.
-              </p>
+                {tx("Installing adds the skill to the organization library. Agents can only use it once it is enabled for them.")}</p>
               <AgentMultiSelect
                 agents={agents}
                 selectedAgentIds={selectedAgentIds}
@@ -2137,12 +2103,12 @@ export function InstallPreviewDialog({
           {advancedOpen ? (
             <div className="space-y-3 rounded-md border border-border p-3 text-xs">
               <div>
-                <label className="mb-1 block uppercase tracking-wide text-muted-foreground">Slug override</label>
+                <label className="mb-1 block uppercase tracking-wide text-muted-foreground">{tx("Slug override")}</label>
                 <Input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder={defaultSlug ?? skill.slug} className="h-8" />
               </div>
               <label className="flex items-center gap-2">
                 <Checkbox checked={force} onCheckedChange={(value) => setForce(Boolean(value))} />
-                <span>Force replace existing same-key skill</span>
+                <span>{tx("Force replace existing same-key skill")}</span>
               </label>
             </div>
           ) : null}
@@ -2204,6 +2170,7 @@ function AttachAgentsPopover({
   onSubmit: (nextIds: string[], versionId: string | null) => void;
   fullWidth?: boolean;
 }) {
+  const tx = useTx();
   const [draftVersionId, setDraftVersionId] = useState<string | null>(selectedVersionId);
   const attachedIds = useMemo(() => new Set(attachedAgentIds), [attachedAgentIds]);
   const eligible = agents.filter((agent) => agent.supportsSkills);
@@ -2234,10 +2201,10 @@ function AttachAgentsPopover({
             onChange={(event) => setDraftVersionId(event.target.value === "__latest__" ? null : event.target.value)}
             className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs text-foreground"
           >
-            <option value="__latest__">Latest</option>
+            <option value="__latest__">{tx("Latest")}</option>
             {sortedVersions.map((version) => (
               <option key={version.id} value={version.id}>
-                v{version.revisionNumber}{version.label ? ` · ${version.label}` : ""}
+                v{version.revisionNumber}{version.label ? ` · ${tx(version.label)}` : ""}
               </option>
             ))}
           </select>
@@ -2380,6 +2347,7 @@ function SkillList({
   onSelectPath: (skillId: string, path: string) => void;
   onClearFilters: () => void;
 }) {
+  const tx = useTx();
   const filteredSkills = skills.filter((skill) => {
     const haystack = `${skill.name} ${skill.key} ${skill.slug} ${skill.sourceLabel ?? ""}`.toLowerCase();
     if (!haystack.includes(skillFilter.toLowerCase())) return false;
@@ -2394,15 +2362,13 @@ function SkillList({
         <div className="px-4 py-6 text-sm text-muted-foreground">
           No {SOURCE_FILTER_LABELS[sourceFilter].toLowerCase()} skills installed.{" "}
           <button type="button" className="text-foreground underline" onClick={onClearFilters}>
-            Clear filter
-          </button>
+            {tx("Clear filter")}</button>
         </div>
       );
     }
     return (
       <div className="px-4 py-6 text-sm text-muted-foreground">
-        No skills match this filter.
-      </div>
+        {tx("No skills match this filter.")}</div>
     );
   }
 
@@ -2492,9 +2458,13 @@ function currentVersionSelection(detail: CompanySkillDetail | null | undefined) 
   return selected ?? null;
 }
 
-function versionLabel(version: CompanySkillVersionSummary | null | undefined) {
-  if (!version) return "Latest";
-  return `v${version.revisionNumber}${version.label ? ` · ${version.label}` : ""}`;
+function versionLabel(
+  version: CompanySkillVersionSummary | null | undefined,
+  translate: (text: string) => string = (text) => text,
+) {
+  if (!version) return translate("Latest");
+  const note = version.label ? translate(version.label) : "";
+  return `v${version.revisionNumber}${note ? ` · ${note}` : ""}`;
 }
 
 export function getSkillVersionDiffSelection(versions: CompanySkillVersionSummary[], targetVersionId?: string | null) {
@@ -2528,6 +2498,7 @@ function SkillVersionDiffDialog({
   onLeftVersionChange: (id: string | null) => void;
   onRightVersionChange: (id: string | null) => void;
 }) {
+  const tx = useTx();
   const sorted = [...versions].sort((a, b) => b.revisionNumber - a.revisionNumber);
   const selectedLeft = sorted.find((version) => version.id === leftVersionId);
   const selectedRight = sorted.find((version) => version.id === rightVersionId);
@@ -2585,7 +2556,7 @@ function SkillVersionDiffDialog({
           <DialogHeader className="shrink-0">
             <DialogTitle>Diff · skill files</DialogTitle>
             {(leftQuery.error || rightQuery.error) && <p role="alert" className="text-sm text-destructive">{(leftQuery.error ?? rightQuery.error)?.message}</p>}
-            {(leftQuery.isLoading || rightQuery.isLoading) && <p className="text-sm text-muted-foreground">Loading selected versions…</p>}
+            {(leftQuery.isLoading || rightQuery.isLoading) && <p className="text-sm text-muted-foreground">{tx("Loading selected versions…")}</p>}
           </DialogHeader>
           <div className="flex flex-wrap items-center gap-3 text-xs">
             <label className="flex items-center gap-2">
@@ -2595,9 +2566,9 @@ function SkillVersionDiffDialog({
                 onChange={(event) => onLeftVersionChange(event.target.value || null)}
                 className="h-8 w-44 rounded-md border border-border bg-background px-2 text-xs"
               >
-                <option value="">Initial</option>
+                <option value="">{tx("Initial")}</option>
                 {sorted.map((version) => (
-                  <option key={version.id} value={version.id}>{versionLabel(version)}</option>
+                  <option key={version.id} value={version.id}>{versionLabel(version, tx)}</option>
                 ))}
               </select>
             </label>
@@ -2609,7 +2580,7 @@ function SkillVersionDiffDialog({
                 className="h-8 w-44 rounded-md border border-border bg-background px-2 text-xs"
               >
                 {sorted.map((version) => (
-                  <option key={version.id} value={version.id}>{versionLabel(version)}</option>
+                  <option key={version.id} value={version.id}>{versionLabel(version, tx)}</option>
                 ))}
               </select>
             </label>
@@ -2634,9 +2605,9 @@ function SkillVersionDiffDialog({
           </aside>
           <div className="min-w-0 flex-1 overflow-auto rounded-md border border-border text-xs">
             {!right ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">Select a version to compare.</div>
+              <div className="p-6 text-center text-sm text-muted-foreground">{tx("Select a version to compare.")}</div>
             ) : left?.id === right.id ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">Both sides are the same version.</div>
+              <div className="p-6 text-center text-sm text-muted-foreground">{tx("Both sides are the same version.")}</div>
             ) : (
               <div className="font-mono text-xs leading-6">
                 <div className="grid grid-cols-(--gtc-1) border-b border-border/60 bg-muted/30 px-3 py-2 text-(length:--text-micro) uppercase tracking-wide text-muted-foreground">
@@ -2721,6 +2692,7 @@ function SkillTagsEditor({
   pending: boolean;
   onSave: (categories: string[]) => void;
 }) {
+  const tx = useTx();
   const [draft, setDraft] = useState("");
   function addTag(raw: string) {
     const tag = raw.trim().toLowerCase();
@@ -2735,8 +2707,7 @@ function SkillTagsEditor({
     <section>
       <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         <Hash className="h-3 w-3" />
-        Tags
-      </div>
+        {tx("Tags")}</div>
       <div className="flex flex-wrap gap-1.5">
         {categories.map((tag) => (
           <span
@@ -2756,7 +2727,7 @@ function SkillTagsEditor({
           </span>
         ))}
         {categories.length === 0 ? (
-          <span className="text-xs text-muted-foreground">No tags yet.</span>
+          <span className="text-xs text-muted-foreground">{tx("No tags yet.")}</span>
         ) : null}
       </div>
       <Input
@@ -2863,6 +2834,7 @@ export function SkillDetailPage({
   deletePending: boolean;
   studioHref?: string;
 }) {
+  const tx = useTx();
   const [diffOpen, setDiffOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSharingScope, setSettingsSharingScope] = useState<Exclude<CompanySkillSharingScope, "public_link">>("company");
@@ -2988,13 +2960,13 @@ export function SkillDetailPage({
                     className={cn("px-3 py-1.5 text-sm", viewMode === "preview" ? "text-foreground" : "text-muted-foreground")}
                     onClick={() => setViewMode("preview")}
                   >
-                    <span className="flex items-center gap-1.5"><Eye className="h-3.5 w-3.5" /> View</span>
+                    <span className="flex items-center gap-1.5"><Eye className="h-3.5 w-3.5" /> {tx("View")}</span>
                   </button>
                   <button
                     className={cn("border-l border-border px-3 py-1.5 text-sm", viewMode === "code" ? "text-foreground" : "text-muted-foreground")}
                     onClick={() => setViewMode("code")}
                   >
-                    <span className="flex items-center gap-1.5"><Code2 className="h-3.5 w-3.5" /> Code</span>
+                    <span className="flex items-center gap-1.5"><Code2 className="h-3.5 w-3.5" /> {tx("Code")}</span>
                   </button>
                 </div>
               ) : null}
@@ -3029,7 +3001,7 @@ export function SkillDetailPage({
           {fileLoading ? (
             <PageSkeleton variant="detail" />
           ) : !file ? (
-            <div className="text-sm text-muted-foreground">Select a file to inspect.</div>
+            <div className="text-sm text-muted-foreground">{tx("Select a file to inspect.")}</div>
           ) : file.encoding === "base64" ? <SkillBinaryFile file={file} /> : editMode && file.editable ? (
             file.markdown ? (
               <MarkdownEditor value={draft} onChange={setDraft} bordered={false} className="min-h-(--sz-520px)" />
@@ -3078,11 +3050,11 @@ export function SkillDetailPage({
           </div>
           <div className="min-w-0 border-b border-border py-2">
             <div className="text-xs text-muted-foreground">Source</div>
-            <div className="mt-1 min-w-0 [overflow-wrap:anywhere]">{sourceLocatorText ?? source.label}</div>
+            <div className="mt-1 min-w-0 [overflow-wrap:anywhere]">{sourceLocatorText ?? tx(source.label)}</div>
           </div>
           <div className="min-w-0 border-b border-border py-2">
             <div className="text-xs text-muted-foreground">Version</div>
-            <div className="mt-1">{versionLabel(skill.currentVersion ?? null)}</div>
+            <div className="mt-1">{versionLabel(skill.currentVersion ?? null, tx)}</div>
           </div>
           <div className="min-w-0 border-b border-border py-2">
             <div className="text-xs text-muted-foreground">Mode</div>
@@ -3126,12 +3098,12 @@ export function SkillDetailPage({
           {versionsLoading ? (
             <PageSkeleton variant="list" />
           ) : sortedVersions.length === 0 ? (
-            <div className="py-6 text-sm text-muted-foreground">No saved versions yet.</div>
+            <div className="py-6 text-sm text-muted-foreground">{tx("No saved versions yet.")}</div>
           ) : (
             sortedVersions.map((version) => (
               <div key={version.id} className="grid gap-2 border-b border-border px-0 py-3 text-sm last:border-b-0 sm:grid-cols-(--gtc-13)">
                 <div className="min-w-0">
-                  <div className="font-medium">{versionLabel(version)}</div>
+                  <div className="font-medium">{versionLabel(version, tx)}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {relativeTime(version.createdAt)} · {version.fileInventory.length} files
                   </div>
@@ -3170,7 +3142,7 @@ export function SkillDetailPage({
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
             {attached.length} {attached.length === 1 ? "agent" : "agents"} attached
-            {selectedVersion ? ` · ${versionLabel(selectedVersion)}` : " · Latest"}
+            {selectedVersion ? ` · ${versionLabel(selectedVersion, tx)}` : ` · ${tx("Latest")}`}
           </p>
           <AttachAgentsPopover
             agents={attachAgents}
@@ -3183,8 +3155,7 @@ export function SkillDetailPage({
         </div>
         {attached.length === 0 ? (
           <div className="rounded-md border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
-            No agents are using this skill yet. Use “Add to agent” to attach it.
-          </div>
+            {tx("No agents are using this skill yet. Use “Add to agent” to attach it.")}</div>
         ) : (
           <div className="border-y border-border">
             {attached.map((agent) => {
@@ -3275,7 +3246,7 @@ export function SkillDetailPage({
                         !descExpanded && "line-clamp-4",
                       )}
                     >
-                      {subtitleText}
+                      {subtitleText === source.label ? tx(subtitleText) : subtitleText}
                     </p>
                     {descClamped ? (
                       <button
@@ -3303,8 +3274,7 @@ export function SkillDetailPage({
             <Button variant="outline" size="sm" asChild>
               <Link to={resolvedStudioHref}>
                 <FlaskConical className="mr-1.5 h-3.5 w-3.5" />
-                Open in Studio
-              </Link>
+                {tx("Open in Studio")}</Link>
             </Button>
             <div className="flex items-center overflow-hidden rounded-md border border-border">
               <Tooltip>
@@ -3315,7 +3285,7 @@ export function SkillDetailPage({
                     <span className="hidden sm:inline">{detail.attachedAgentCount === 1 ? "install" : "installs"}</span>
                   </span>
                 </TooltipTrigger>
-                <TooltipContent>Agents in this organization that currently have this skill installed.</TooltipContent>
+                <TooltipContent>{tx("Agents in this organization that currently have this skill installed.")}</TooltipContent>
               </Tooltip>
               <button
                 type="button"
@@ -3332,10 +3302,10 @@ export function SkillDetailPage({
                 type="button"
                 onClick={onFork}
                 className="inline-flex items-center gap-1.5 border-l border-border px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-                title="Fork this skill"
+                title={tx("Fork this skill")}
               >
                 <GitFork className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{skill.sourceType === "github" ? "Make a copy" : "Fork"}</span>
+                <span className="hidden sm:inline">{skill.sourceType === "github" ? tx("Make a copy") : "Fork"}</span>
                 <span className="font-medium text-foreground">{detail.forkCount}</span>
               </button>
             </div>
@@ -3388,7 +3358,7 @@ export function SkillDetailPage({
                 fullWidth
               />
               {detail.usedByAgents.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No agents attached yet.</p>
+                <p className="text-xs text-muted-foreground">{tx("No agents attached yet.")}</p>
               ) : (
                 <div className="space-y-0.5">
                   {/* Preview up to three attached agents, then summarise the rest. */}
@@ -3448,7 +3418,7 @@ export function SkillDetailPage({
               <div className="flex items-start gap-2 text-sm">
                 <SourceIcon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <div className="min-w-0">
-                  <div className="text-foreground">{source.label}</div>
+                  <div className="text-foreground">{tx(source.label)}</div>
                   {sourceLocatorText ? (
                     sourceHref ? (
                       <a
@@ -3478,7 +3448,7 @@ export function SkillDetailPage({
               (PAP-10907 F). Only GitHub-sourced skills can pull updates. */}
           {detail.sourceType === "github" ? (
             <section>
-              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Updates</div>
+              <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{tx("Updates")}</div>
               <div className="space-y-2">
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Tooltip>
@@ -3496,10 +3466,10 @@ export function SkillDetailPage({
                 {updateStatus?.supported && updateStatus.hasUpdate ? (
                   <Button size="sm" className="w-full" onClick={onInstallUpdate} disabled={installUpdatePending}>
                     <ArrowUpCircle className={cn("mr-1.5 h-3.5 w-3.5", installUpdatePending && "animate-spin")} />
-                    Install update{latestPin ? ` ${latestPin}` : ""}
+                    {"Install update"}{latestPin ? ` ${latestPin}` : ""}
                   </Button>
                 ) : updateStatus?.supported && !updateStatus.hasUpdate && !updateStatusLoading ? (
-                  <p className="text-xs text-muted-foreground">Up to date.</p>
+                  <p className="text-xs text-muted-foreground">{tx("Up to date.")}</p>
                 ) : null}
               </div>
             </section>
@@ -3563,7 +3533,7 @@ export function SkillDetailPage({
                 className="h-9"
                 disabled={updateSettingsPending}
               />
-              <p className="text-xs text-muted-foreground">Separate categories with commas. Leave empty to clear categories.</p>
+              <p className="text-xs text-muted-foreground">{tx("Separate categories with commas. Leave empty to clear categories.")}</p>
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sharing</label>
@@ -3573,10 +3543,10 @@ export function SkillDetailPage({
                 disabled={updateSettingsPending}
                 className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
               >
-                <option value="company">Organization — visible inside this organization</option>
-                <option value="private">Private — only visible in your library</option>
+                <option value="company">{tx("Organization — visible inside this organization")}</option>
+                <option value="private">{tx("Private — only visible in your library")}</option>
               </select>
-              <p className="text-xs text-muted-foreground">Public link sharing is coming later.</p>
+              <p className="text-xs text-muted-foreground">{tx("Public link sharing is coming later.")}</p>
             </div>
             <div className="flex justify-end gap-2 border-t border-border pt-4">
               <Button
@@ -3605,7 +3575,7 @@ export function SkillDetailPage({
               <div className="rounded-md border border-destructive/40 p-3">
                 <div className="text-xs font-semibold uppercase tracking-wide text-destructive">Danger zone</div>
                 <div className="mt-2 flex items-center justify-between gap-3">
-                  <p className="min-w-0 text-xs text-muted-foreground">Remove this skill from the organization library.</p>
+                  <p className="min-w-0 text-xs text-muted-foreground">{tx("Remove this skill from the organization library.")}</p>
                   <Button
                     variant="destructive"
                     size="sm"
@@ -3678,6 +3648,7 @@ function SkillPane({
   onSubmitAttach: (ids: string[], versionId: string | null) => void;
   attachPending: boolean;
 }) {
+  const tx = useTx();
   if (!detail) {
     if (loading) {
       return <PageSkeleton variant="detail" />;
@@ -3719,8 +3690,7 @@ function SkillPane({
             <Button variant="outline" size="sm" asChild>
               <Link to={skillStudioRoute(detail.id)}>
                 <FlaskConical className="mr-1.5 h-3.5 w-3.5" />
-                Open in Studio
-              </Link>
+                {tx("Open in Studio")}</Link>
             </Button>
             <Button
               variant="ghost"
@@ -3763,21 +3733,21 @@ function SkillPane({
                     <CopyText
                       text={detail.sourcePath}
                       copiedLabel="Copied path"
-                      ariaLabel="Copy source path"
-                      title="Copy source path"
+                      ariaLabel={tx("Copy source path")}
+                      title={tx("Copy source path")}
                       className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-sm border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                     >
                       <Copy className="h-3.5 w-3.5" />
                     </CopyText>
                   </>
                 ) : (
-                  <span className="truncate">{source.label}</span>
+                  <span className="truncate">{tx(source.label)}</span>
                 )}
               </span>
             </div>
             {detail.sourceType === "github" && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-(length:--text-micro) uppercase tracking-(--tracking-caps) text-muted-foreground">Pin</span>
+                <span className="text-(length:--text-micro) uppercase tracking-(--tracking-caps) text-muted-foreground">{tx("Pin")}</span>
                 <span className="font-mono text-xs">{currentPin ?? "untracked"}</span>
                 {updateStatus?.trackingRef && (
                   <span className="text-xs text-muted-foreground">tracking {updateStatus.trackingRef}</span>
@@ -3798,11 +3768,11 @@ function SkillPane({
                     disabled={installUpdatePending}
                   >
                     <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", installUpdatePending && "animate-spin")} />
-                    Install update{latestPin ? ` ${latestPin}` : ""}
+                    {"Install update"}{latestPin ? ` ${latestPin}` : ""}
                   </Button>
                 )}
                 {updateStatus?.supported && !updateStatus.hasUpdate && !updateStatusLoading && (
-                  <span className="text-xs text-muted-foreground">Up to date</span>
+                  <span className="text-xs text-muted-foreground">{tx("Up to date")}</span>
                 )}
                 {!updateStatus?.supported && updateStatus?.reason && (
                   <span className="text-xs text-muted-foreground">{updateStatus.reason}</span>
@@ -3830,7 +3800,7 @@ function SkillPane({
                     Locally modified
                   </Badge>
                 </TooltipTrigger>
-                <TooltipContent>You have edited this skill after installing. Updates from the catalog will overwrite your changes.</TooltipContent>
+                <TooltipContent>{tx("You have edited this skill after installing. Updates from the catalog will overwrite your changes.")}</TooltipContent>
               </Tooltip>
             ) : null}
             {(() => {
@@ -3852,7 +3822,7 @@ function SkillPane({
               />
             </div>
             {usedBy.length === 0 ? (
-              <span className="text-muted-foreground">No agents attached</span>
+              <span className="text-muted-foreground">{tx("No agents attached")}</span>
             ) : (
               <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {usedBy.map((agent) => (
@@ -3917,7 +3887,7 @@ function SkillPane({
         {fileLoading ? (
           <PageSkeleton variant="detail" />
         ) : !file ? (
-          <div className="text-sm text-muted-foreground">Select a file to inspect.</div>
+          <div className="text-sm text-muted-foreground">{tx("Select a file to inspect.")}</div>
         ) : editMode && file.editable ? (
           file.markdown ? (
             <MarkdownEditor
@@ -3946,6 +3916,7 @@ function SkillPane({
 }
 
 export function CompanySkills({ collectionView }: { collectionView?: "authored" } = {}) {
+  const tx = useTx();
   const { "*": routePath } = useParams<{ "*": string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -5174,8 +5145,7 @@ export function CompanySkills({ collectionView }: { collectionView?: "authored" 
             ) : null}
             {(deleteTargetDetail?.usedByAgents.length ?? 0) > 0 ? (
               <p className="text-muted-foreground">
-                Detach this skill from all agents to enable removal.
-              </p>
+                {tx("Detach this skill from all agents to enable removal.")}</p>
             ) : null}
           </div>
           <DialogFooter>
@@ -5217,10 +5187,9 @@ export function CompanySkills({ collectionView }: { collectionView?: "authored" 
               className="flex items-start justify-between rounded-md border border-border px-3 py-3 text-foreground no-underline transition-colors hover:bg-accent/40"
             >
               <span>
-                <span className="block font-medium">Browse skills.sh</span>
+                <span className="block font-medium">{tx("Browse skills.sh")}</span>
                 <span className="mt-1 block text-muted-foreground">
-                  Find install commands and paste one here.
-                </span>
+                  {tx("Find install commands and paste one here.")}</span>
               </span>
               <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             </a>
@@ -5231,10 +5200,8 @@ export function CompanySkills({ collectionView }: { collectionView?: "authored" 
               className="flex items-start justify-between rounded-md border border-border px-3 py-3 text-foreground no-underline transition-colors hover:bg-accent/40"
             >
               <span>
-                <span className="block font-medium">Search GitHub</span>
-                <span className="mt-1 block text-muted-foreground">
-                  Look for repositories with `SKILL.md`, then paste the repo URL here.
-                </span>
+                <span className="block font-medium">{tx("Search GitHub")}</span>
+                <span className="mt-1 block text-muted-foreground">{tx("Look for repositories with `SKILL.md`, then paste the repo URL here.")}</span>
               </span>
               <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             </a>
@@ -5294,8 +5261,8 @@ export function CompanySkills({ collectionView }: { collectionView?: "authored" 
               className="flex items-start justify-between rounded-md border border-border px-3 py-3 text-sm text-foreground no-underline transition-colors hover:bg-accent/40"
             >
               <span>
-                <span className="block font-medium">Browse skills.sh</span>
-                <span className="mt-1 block text-muted-foreground">Find install commands and paste one here.</span>
+                <span className="block font-medium">{tx("Browse skills.sh")}</span>
+                <span className="mt-1 block text-muted-foreground">{tx("Find install commands and paste one here.")}</span>
               </span>
               <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             </a>
@@ -5306,8 +5273,8 @@ export function CompanySkills({ collectionView }: { collectionView?: "authored" 
               className="flex items-start justify-between rounded-md border border-border px-3 py-3 text-sm text-foreground no-underline transition-colors hover:bg-accent/40"
             >
               <span>
-                <span className="block font-medium">Search GitHub</span>
-                <span className="mt-1 block text-muted-foreground">Look for repositories with `SKILL.md`, then paste the repo URL.</span>
+                <span className="block font-medium">{tx("Search GitHub")}</span>
+                <span className="mt-1 block text-muted-foreground">{tx("Look for repositories with `SKILL.md`, then paste the repo URL.")}</span>
               </span>
               <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             </a>
@@ -5411,7 +5378,7 @@ export function CompanySkills({ collectionView }: { collectionView?: "authored" 
         {!streamlinedUiEnabled ? (
           <div className="px-4 pt-4">
             <Tabs value={legacyDiscoveryTab} onValueChange={(value) => setLegacyDiscoveryTab(value as "all" | "installed" | "catalog" | "bundled")}>
-              <TabsList variant="line" aria-label="Skills view">
+              <TabsList variant="line" aria-label={tx("Skills view")}>
                 <TabsTrigger value="all">All</TabsTrigger>
                 <TabsTrigger value="installed">Installed</TabsTrigger>
                 <TabsTrigger value="catalog">Catalog</TabsTrigger>
@@ -5497,7 +5464,7 @@ export function CompanySkills({ collectionView }: { collectionView?: "authored" 
                 ? `Moved "${card.name}" to ${skillFolderResult?.folders.find((folder) => folder.id === folderId)?.name ?? "folder"}.`
                 : `Moved "${card.name}" to Unfiled.`,
               action: {
-                label: "Undo",
+                label: tx("Undo"),
                 onClick: () => moveSkillToFolder.mutate({ itemId: skillId, folderId: previousFolderId }),
               },
             });
@@ -5583,8 +5550,7 @@ export function CompanySkills({ collectionView }: { collectionView?: "authored" 
               className="inline-flex items-center gap-1.5 text-sm text-muted-foreground no-underline transition-colors hover:text-foreground"
             >
               <ChevronLeft className="h-4 w-4" />
-              Back to store
-            </Link>
+              {tx("Back to store")}</Link>
           </div>
           {catalogListQuery.isLoading || catalogDetailQuery.isLoading || catalogListView.kind === "reconnecting" || catalogDetailView.kind === "reconnecting" ? (
             <PageSkeleton variant="detail" />

@@ -28,6 +28,7 @@ import {
 } from "../lib/keyboardShortcuts";
 import { formatAssigneeUserLabel } from "../lib/assignees";
 import { buildCompanyUserLabelMap, buildCompanyUserProfileMap } from "../lib/company-members";
+import { indexById } from "../lib/index-by-id";
 import { createIssueDetailPath, rememberIssueDetailLocationState, withIssueDetailHeaderSeed } from "../lib/issueDetailBreadcrumb";
 import { prefetchIssueDetailForNavigation } from "../lib/issueDetailCache";
 import {
@@ -893,10 +894,11 @@ export function IssuesList({
     enabled: !!selectedCompanyId && isolatedWorkspacesEnabled,
   });
 
+  const agentById = useMemo(() => indexById(agents), [agents]);
   const agentName = useCallback((id: string | null) => {
-    if (!id || !agents) return null;
-    return agents.find((a) => a.id === id)?.name ?? null;
-  }, [agents]);
+    if (!id) return null;
+    return agentById.get(id)?.name ?? null;
+  }, [agentById]);
 
   const companyUserLabelMap = useMemo(
     () => buildCompanyUserLabelMap(companyMembers?.users),
@@ -2259,8 +2261,8 @@ export function IssuesList({
                               })}
                               onFilterWorkspace={filterToWorkspace}
                               assigneeName={agentName(issue.assigneeAgentId)}
-                            assigneeAgent={agents?.find((agent) => agent.id === issue.assigneeAgentId)}
-                            creatorAgent={agents?.find((agent) => agent.id === issue.createdByAgentId)}
+                            assigneeAgent={issue.assigneeAgentId ? agentById.get(issue.assigneeAgentId) : undefined}
+                            creatorAgent={issue.createdByAgentId ? agentById.get(issue.createdByAgentId) : undefined}
                               assigneeUserName={assigneeUserLabel}
                               assigneeUserAvatarUrl={assigneeUserProfile?.image ?? null}
                               creatorAgentName={agentName(issue.createdByAgentId)}
@@ -2284,7 +2286,7 @@ export function IssuesList({
                                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
                                     >
                                       {issue.assigneeAgentId && agentName(issue.assigneeAgentId) ? (
-                                        <AgentIdentity agent={agents!.find((agent) => agent.id === issue.assigneeAgentId)!} size="sm" className="min-w-0" />
+                                        <AgentIdentity agent={agentById.get(issue.assigneeAgentId)!} size="sm" className="min-w-0" />
                                       ) : issue.assigneeUserId ? (
                                         <Identity
                                           name={assigneeUserLabel ?? "User"}

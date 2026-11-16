@@ -9,7 +9,7 @@ const state = vi.hoisted(() => ({ onboardingOpen: false, onboardingRouteDismisse
 const mount = vi.hoisted(() => vi.fn());
 const setDismissed = vi.hoisted(() => vi.fn());
 vi.mock("../context/DialogContext", () => ({ useDialogState: () => state, useDialogActions: () => ({ closeOnboarding: vi.fn(), setOnboardingRouteDismissed: setDismissed }) }));
-vi.mock("../lib/router", () => ({ useLocation: () => state }));
+vi.mock("../lib/router", () => ({ useLocation: () => state, useNavigate: () => vi.fn() }));
 vi.mock("./OnboardingWizard", () => ({
   OnboardingWizard: () => { mount(); return <div data-testid="wizard-capsule" />; },
 }));
@@ -43,6 +43,13 @@ describe("OnboardingWizardVariant", () => {
     state.pathname = pathname;
     await renderVariant();
     expect(container.querySelector('[data-testid="wizard-capsule"]')).not.toBeNull();
+  });
+  it("leaves the connect page uncovered while setup is open", async () => {
+    state.onboardingOpen = true;
+    state.pathname = "/BMC/apps/connect";
+    await renderVariant();
+    expect(container.querySelector('[data-testid="wizard-capsule"]')).toBeNull();
+    expect(mount).not.toHaveBeenCalled();
   });
   it("loads on dialog request and preserves the mounted wizard after closing", async () => {
     await renderVariant();

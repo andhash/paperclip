@@ -165,8 +165,12 @@ function useLiveWorkStatusPresentation(
     })),
   });
   const summaries = results.flatMap((result) => result.data ?? []);
+  const summaryById = new Map<string, (typeof summaries)[number]>();
+  for (const summary of summaries) {
+    if (!summaryById.has(summary.id)) summaryById.set(summary.id, summary);
+  }
   return (blocker) => {
-    const summary = summaries.find((candidate) => candidate.id === blocker.id);
+    const summary = summaryById.get(blocker.id);
     if (summary) return taskStatusIconProps(summary);
     if ("status" in blocker) return taskStatusIconProps(blocker);
     // A sampled terminal blocker carries no status; it is only listed while live.

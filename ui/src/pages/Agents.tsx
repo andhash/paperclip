@@ -399,6 +399,7 @@ export function Agents({ initialView = "list" }: { initialView?: AgentsView } = 
         )}
       </>
     ) : null;
+    const departmentLabel = rosterFilters.departmentLabel(agent.id);
     return (
       <div key={agent.id} className="agent-pin-row agent-roster-pin-row group/agent-pin relative">
       <EntityRow
@@ -407,7 +408,7 @@ export function Agents({ initialView = "list" }: { initialView?: AgentsView } = 
         titleClassName="agent-pin-text flex-1"
         titleTextClassName="truncate"
         subtitleClassName="truncate"
-        subtitle={`${roleLabels[agent.role] ?? agent.role}${agent.title ? ` - ${agent.title}` : ""}`}
+        subtitle={`${roleLabels[agent.role] ?? agent.role}${agent.title ? ` - ${agent.title}` : ""}${departmentLabel ? ` · ${departmentLabel}` : ""}`}
         to={agentUrl(agent)}
         className="agent-roster-identity group py-3 group-hover/agent-pin:bg-accent/50 group-focus-within/agent-pin:bg-accent/50"
         leading={hasInvalidOrgChain ? (
@@ -432,7 +433,7 @@ export function Agents({ initialView = "list" }: { initialView?: AgentsView } = 
   };
 
   const renderAgentStatus = (agent: Agent) => (
-    <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-center gap-2">
       {liveRunByAgent.has(agent.id) && (
         <LiveRunIndicator
           agentRef={agentRouteRef(agent)}
@@ -708,14 +709,14 @@ function LiveRunIndicator({
   return (
     <Link
       to={`/agents/${agentRef}/runs/${runId}`}
-      className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 hover:bg-blue-500/20 transition-colors no-underline"
+      className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-2 py-0.5 rounded-full bg-blue-500/10 hover:bg-blue-500/20 transition-colors no-underline"
       onClick={(e) => e.stopPropagation()}
     >
-      <span className="relative flex h-2 w-2">
+      <span className="relative flex h-2 w-2 shrink-0">
         <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
         <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
       </span>
-      <span className="text-(length:--text-micro) font-medium text-blue-600 dark:text-blue-400">
+      <span className="whitespace-nowrap text-(length:--text-micro) font-medium text-blue-600 dark:text-blue-400">
         Live{liveCount > 1 ? ` (${liveCount})` : ""}
       </span>
     </Link>
